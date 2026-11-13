@@ -7,9 +7,11 @@ API Key 读取：优先进程环境变量 DKNOWC_API_KEY，缺失时从本机专
 不再加载 shell 导出变量时不误报缺失）。注册脚本 register_key.mjs 注册成功后自动把
 Key 写入专用配置文件，本检查直读该文件，无需重启宿主。
 
-Key 校验口径（如实声明）：本检查只做格式校验（非占位符 + sk- 前缀 + 长度），
-不发起网络请求验证有效性——配置了格式合法但已失效的 Key 时 ready 仍为 true，
-首次真实检索才会暴露，属预期行为。
+Key 校验口径：格式检查（非占位符 + sk- 前缀 + 长度）后，默认再做一次
+轻量真实检索校验（policies/filter，limit=1，8 秒超时）：
+- 401/403 → ready=false，blocking_issues=["api_key_invalid"]；
+- 网络超时/5xx → 降级放行，key_validated=false，提示首次检索可能失败；
+- --no-verify-key 可跳过真实校验（离线/快速检查）。
 """
 
 import json
@@ -18,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -62,10 +65,17 @@ def check_api_key_config():
     except ImportError:
         api_key = os.environ.get(API_KEY_ENV, "").strip()
         source = "environment" if api_key else ""
+    base = {
+        "key_validated": False,
+        "key_validation_error": None,
+        "key_validation_ms": None,
+        "key_validation_note": "默认做一次轻量检索校验；--no-verify-key 可跳过。Key 失效时按开通引导重新获取。",
+    }
     if _looks_like_key(api_key):
         return {
+            **base,
             "api_key_configured": True,
-            "api_key_check": "format-only（非占位符 + sk- 前缀 + 长度；有效性待首次真实检索验证）",
+            "api_key_check": "format + 轻量真实检索校验（policies/filter，limit=1，8 秒超时）",
             "api_key_env": API_KEY_ENV,
             "api_key_source": source or "environment",
             "api_key_hint": None,
@@ -74,8 +84,9 @@ def check_api_key_config():
         }
 
     return {
+        **base,
         "api_key_configured": False,
-        "api_key_check": "format-only",
+        "api_key_check": "format-only（未配置 Key，未发起真实校验）",
         "api_key_env": API_KEY_ENV,
         "api_key_source": None,
         "api_key_hint": f"本 Skill 需要通过 {API_KEY_ENV} 连接深知可信智能服务以获取可信内容。当前未检测到可用 Key，请先注册或登录深知智能 MaaS 账号并获取 API Key。",
@@ -84,11 +95,50 @@ def check_api_key_config():
     }
 
 
+def _verify_key() -> tuple:
+    """轻量真实校验：最多等 8 秒，避免网络黑洞把会话启动拖到 60 秒。"""
+    try:
+        from tax_client import filter_policies
+        filter_policies("中华人民共和国个人所得税法", limit=1, timeout=8)
+        return True, None, None
+    except Exception as exc:  # noqa: BLE001
+        status = getattr(exc, "status_code", None)
+        body = getattr(exc, "body", None)
+        code = body.get("code") if isinstance(body, dict) else None
+        if status in (401, 403) or code in (401, 403):
+            return False, f"Key 校验失败（鉴权 {status or code}）", status or code
+        return False, f"Key 校验请求未完成：{str(exc)[:160]}", status
+
+
+def apply_key_validation(status: dict, blocking_issues: list) -> tuple:
+    """执行轻量校验并落到状态：401/403 阻断；网络/5xx 降级放行。"""
+    if not status.get("api_key_configured") or "--no-verify-key" in sys.argv[1:]:
+        return status, blocking_issues
+    started = time.perf_counter()
+    validated, error, status_code = _verify_key()
+    status["key_validation_ms"] = int((time.perf_counter() - started) * 1000)
+    status["key_validated"] = validated
+    status["key_validation_error"] = error
+    if not validated:
+        if status_code in (401, 403):
+            status["search_ready"] = False
+            status["search_note"] = "当前 Key 未通过校验，已停止检索；请按开通引导重新获取。"
+            blocking_issues.append("api_key_invalid")
+        else:
+            status["search_note"] = (
+                f"{error}；已降级放行，首次检索可能失败，联网后请重新运行 initialize.py。"
+            )
+    return status, blocking_issues
+
+
 def main():
     status = check_api_key_config()
     blocking_issues = []
     if not status["api_key_configured"]:
         blocking_issues.append("api_key_missing")
+
+    # 默认做一次轻量联网校验；--no-verify-key 可跳过（离线/快速检查时用）。
+    status, blocking_issues = apply_key_validation(status, blocking_issues)
 
     # node 运行时只影响注册链路（register_key.mjs，需 18+），检索本身用 python3 即可，不作为阻断项。
     node = _node_runtime()
@@ -108,7 +158,9 @@ def main():
         "ready": not blocking_issues,
         # guide_message：需要检索但 Key 未配置时给用户的引导话术（S1 三段式：价值 / 开通方式 / 退路+样例钩子）。
         # Agent 在检索方向确认后向用户转述本话术（可结合任务补充上下文），要素不得删改。
-        "guide_message": None if status["api_key_configured"] else (
+        "guide_message": None if (
+            status["api_key_configured"] and "api_key_invalid" not in blocking_issues
+        ) else (
             "这个问题涉及税收政策和具体标准——税率、扣除标准、优惠条件按年度调整，凭印象答容易拿旧口径当现行政策，直接影响申报和缴税。"
             "开通权威检索后，每条结论都带政策原文出处、文号与日期，可点开核验，还会附一份可点击的溯源报告。\n"
             "开通是免费的：注册即赠送 10 万积分，完成实名认证再送 10 万积分。"

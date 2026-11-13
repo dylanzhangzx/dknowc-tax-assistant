@@ -58,6 +58,31 @@ RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
      ("同时", "三项", "资产", "人数", "所得额")),
 )
 
+# 数值型规则：关键词本身不是问题，"给出具体数字但没出处"才是问题。
+# 只对命中具体税率/金额的句子触发，避免"取决于税率档"这类假设句误报。
+RATE_NUMBER_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*[%％]|百分之[一二三四五六七八九十百零〇\d]+|\d+\s*个点)"
+)
+NUMBER_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*[%％]|百分之[一二三四五六七八九十百零〇\d]+|\d+\s*个点|"
+    r"\d[\d,，]*(?:\.\d+)?\s*(?:万)?元)"
+)
+NUMERIC_RULES = {
+    "税率": RATE_NUMBER_RE,
+    "征收率": RATE_NUMBER_RE,
+    "速算扣除": NUMBER_RE,
+    "扣除标准": NUMBER_RE,
+    "起征点": NUMBER_RE,
+}
+# 已限定：文号、公告编号、文件全称。仅写年份不算出处（年份只证明时间）。
+DOC_CONTEXT_RE = re.compile(
+    r"(?:〔\d{4}〕|第\d+号|公告\s*\d{4}\s*年第\s*\d+\s*号|财税\s*〔|《[^》]{2,80}》)"
+)
+# 假设/试算语境：句中出现具体数字也不当作“在断言适用税率”。
+HYPOTHETICAL_RE = re.compile(
+    r"(?:假设|假定|假如|如果|若(?!干)|试算|举例|例如|比如|情景|按.{0,8}(?:测算|试算))"
+)
+
 # 句式级检查：条件 + 后果，防止把词换成同义词绕过。
 CONSEQUENCE_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"(一旦|只要).{0,50}(就|便|会).{0,30}(违法|无效|免税|征税|处罚|加收|滞纳金|不能|不予|没了|补税)",
@@ -81,7 +106,18 @@ def scan(answer: str) -> List[Dict[str, str]]:
         if in_fence or not line or line.startswith(">"):
             continue
         for term, question, unless in RULES:
-            if term in line and not any(u in line for u in unless):
+            if term in NUMERIC_RULES:
+                # 数值型规则只在给出具体数字时触发；"税率档/税率表"等假设句不拦。
+                # 年度用“2026年”这类上下文判断，避免把“2000元”里的 2000 当年份。
+                triggered = (
+                    term in line
+                    and bool(NUMERIC_RULES[term].search(line))
+                    and not DOC_CONTEXT_RE.search(line)
+                    and not HYPOTHETICAL_RE.search(line)
+                )
+            else:
+                triggered = term in line and not any(u in line for u in unless)
+            if triggered:
                 key = (lineno, term)
                 if key not in seen:
                     seen.add(key)

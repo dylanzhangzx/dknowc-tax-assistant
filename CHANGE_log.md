@@ -1,5 +1,32 @@
 # CHANGE_log · dknowc-tax-assistant
 
+## v1.0.3（2026-11-12/13，测试反馈修复 + 来源展示口径，未封版）
+
+### 来源展示口径同步（2026-11-13）
+
+按 Dylan 授权口径（与深知公文写作 3.9.7 对齐）：来源卡不再展示“数据源”，统一展示“发布或实施机构”。
+
+- `render_trace_html.py`：`agency` 只取「发布或实施机构 → 发布机关」；删除 `unit`/`sourceElement`/`数据源`/`来源`/站点名回退，缺失留空，不从标题前缀推导。
+- `source_cards.py`：`issuer` 只取「发布或实施机构 → 发布机关」，不再回退 `数据源`。
+- `merge_search_results.py`：`_to_article` 透传 `发布或实施机构`（此前合并后会丢，渲染层只能拿到站点名）。
+- `websearch_convert.py`：新增 `ISSUER_KEYS`，将 `publisher/issuer/organization` 原样透传为 `发布或实施机构`；`数据源` 仍保留站点名。
+- `reference/answer-and-report.md`：引用模板明确“政策依据用「发文机构：XX」，数据支撑用「来源：XX」，不写「数据源：XX」”；`reference/capability-layer.md` 同步 issuer 口径。
+- 新增 `tests/test_source_agency.py`（5 项）：渲染/材料画像不回退、merge 透传、WebSearch 转换透传。
+- 版本号保持 1.0.3；**未封版时版本号不递增，仍正常出 zip 送审**；通过审核后再交 public 会话做渠道对齐。
+
+### 测试反馈修复（2026-11-12）
+
+修复杨艳慧《深知MaaS新接口测试报告 V1.0》§五 税务三条：
+
+- **DW-0118** `check_answer.py`：「税率/征收率/速算扣除/扣除标准/起征点」不再按关键词触发；改为命中具体数字（`%`、百分之、个点、元金额）且同一行没有年度（`20xx年`）或文号（`〔20xx〕`/`第x号`/`公告x年第x号`/`财税〔`）才拦。假设句「取决于所适用的税率档」不再误报；无出处的具体税率仍会被拦。
+- **DW-0119** `tax_search.py`：`--search-channel webSearch` 阶段二无条件写 `数据权威性=非权威`，不再依赖接口 dataAuthority（可能返回“权威”）。`source_cards.py` 增加 `data_authority`（外部材料强制非权威）、`source_nature_status=explicit/inferred`、`library_material`，并在“外部材料被接口标权威”或“来源性质无法判定”时输出 warnings。
+- **DW-0121** `render_trace_html.py`：研究资料解析支持三级及以下小标题下的表格、`-/*` 列表；二级标题才重置当前节；解析 0 项时返回 `parsed=false` 与 warnings，CLI 打 warning，过程条显示“研究资料未解析”，不再静默输出 0。
+- **DW-0122** `initialize.py`：Key 校验从 format-only 改为“格式检查 + 轻量真实检索校验”（`policies/filter`，limit=1，8 秒超时）。401/403 → `ready=false`、`blocking_issues=["api_key_invalid"]`；网络超时/5xx → 降级放行、`key_validated=false`；新增 `--no-verify-key` 跳过。`tax_client.filter_policies` 增加 `timeout` 参数（默认仍 60 秒）。实测正常网络校验约 0.9–1.0 秒，失效 Key 约 70–120 毫秒返回 403。
+- **DW-0125** SKILL.md 删除对 `CHANGE_log.md` 的引用；目录说明不再把 `check_release` 列为包内脚本，改为“评测工具与测试集、发布检查脚本与变更记录由维护仓库保存，不入 skill 包”。`check_release.py` 新增包内文档自洽检查：SKILL/reference 中指向 `scripts/`、`reference/`、`resources/` 的文件必须存在；出现 `CHANGE_log.md`/`README.md` 引用直接失败。全量扫描确认其余显式引用均在包内。
+- **审核建议修复（2026-11-13）**：① 税率类数值规则不再把年份当出处——仅 `20xx年` 仍会告警，需文号或《文件全称》；② 研究资料空表（只有表头+分隔行）不再计 1 项，`parsed=false` 并告警；③ 含具体数字的假设句（假设/若/如果/试算/举例等）不再按“断言税率”告警。
+- 新增 `tests/test_test_fixes_20261112.py`（14 项）与 `tests/test_initialize_key.py`（4 项）；原能力层 15 项回归仍通过。
+- 版本号按 Dylan 指示升至 1.0.3；**本轮不封版、不打包、不发布**。
+
 ## v1.0.2（2026-11-11）
 
 ### 渠道包整改（A 轨 9 渠道 + skillhub 基线）

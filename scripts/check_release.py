@@ -37,6 +37,12 @@ MASKED_PHONE_PATTERN = re.compile(r"1[3-9]\d\*{4}\d{4}")
 # 注意：目录名拆开拼接，避免字面量写进本文件造成自命中
 _EXT_DIRS = ["01-问" + "题清单", "02-数据" + "问题报告", "03-测" + "试与对比", "04-产" + "品文档", "05-证" + "据数据", "06-标" + "签目录", "00-交" + "接", "99-临" + "时"]
 EXTERNAL_REF_PATTERN = re.compile(r"(\.\./0\d-[^/\s]*|" + "|".join(re.escape(d) for d in _EXT_DIRS) + ")")
+# 包内文档自洽检查（2026-11-12 DW-0125）：SKILL/reference 里指向 scripts/、reference/、
+# resources/ 的文件必须真实存在；CHANGE_log/README 不随公开包分发，不得在对外文档里引用。
+DOC_REF_PATTERN = re.compile(
+    r"(?<![\w./-])((?:scripts|reference|resources)/[A-Za-z0-9_.\-/]+\.(?:md|json|py|mjs|js|txt|html))"
+)
+PACKAGE_EXCLUDED_DOC_RE = re.compile(r"\b(CHANGE_log\.md|README\.md)\b")
 
 
 def main():
@@ -67,6 +73,19 @@ def main():
             for term in BANNED_TERMS:
                 if term in line:
                     findings.append(f"{path.relative_to(SKILL_ROOT)}:{line_number}: {term}")
+        # 对外文档自洽检查：只查 SKILL.md 与 reference/，避免 README 自引用误报。
+        if path.name == "SKILL.md" or path.parent.name == "reference":
+            for line_number, line in enumerate(text.splitlines(), 1):
+                if PACKAGE_EXCLUDED_DOC_RE.search(line):
+                    findings.append(
+                        f"{path.relative_to(SKILL_ROOT)}:{line_number}: 引用了不随公开包分发的 CHANGE_log/README"
+                    )
+                for match in DOC_REF_PATTERN.finditer(line):
+                    ref = match.group(1)
+                    if not (SKILL_ROOT / ref).is_file():
+                        findings.append(
+                            f"{path.relative_to(SKILL_ROOT)}:{line_number}: 引用了包内不存在的文件 {ref}"
+                        )
         if path.suffix != ".py":
             for match in API_KEY_PATTERN.finditer(text):
                 if match.group(1) not in ALLOWED_API_KEY_VALUES:

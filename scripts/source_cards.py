@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
@@ -272,6 +273,7 @@ def _tax_types(item: Dict[str, Any], title: str) -> List[str]:
 
 def build_cards(payload: Any, question_jurisdiction: str = "") -> Dict[str, Any]:
     cards: List[Dict[str, Any]] = []
+    warnings: List[str] = []
     for idx, item in enumerate(_articles(payload), start=1):
         spans = _spans(item)
         unofficial = bool(item.get("非官方来源"))
@@ -283,18 +285,30 @@ def build_cards(payload: Any, question_jurisdiction: str = "") -> Dict[str, Any]
         jurisdiction = _infer_jurisdiction(item)
         title = _first(item, "文章标题", "标题")
         official = _is_official(nature) if (unofficial or explicit) else True
+        api_authority = _first(item, "数据权威性", "authority")
+        data_authority = "非权威" if unofficial else api_authority
+        sid = str(item.get("文章Id") or f"s{idx}")
+        if unofficial and api_authority == "权威":
+            warnings.append(
+                f"来源 {sid} 是非官方来源但接口标了数据权威性=权威，已按非权威处理"
+            )
+        if unofficial and not explicit and nature == "未知":
+            warnings.append(f"来源 {sid} 无法判定来源性质，已标“未知”")
         cards.append({
             "id": str(item.get("文章Id") or f"s{idx}"),
             "article_no": item.get("编号"),
             "title": title,
-            "issuer": _first(item, "发布或实施机构", "发布机关", "数据源"),
+            "issuer": _first(item, "发布或实施机构", "发布机关"),
             "jurisdiction": jurisdiction,
             "jurisdiction_status": "known" if jurisdiction else "unknown",
             "doc_type": _doc_type(item),
             "source_grade": _source_grade(nature, unofficial, explicit),
             "source_nature": nature,
+            "source_nature_status": "explicit" if explicit else "inferred",
             "source_channel": _channel(item, unofficial),
             "official": official,
+            "library_material": not unofficial,
+            "data_authority": data_authority,
             "published_at": _first(item, "发布日期", "date"),
             "effective_at": _first(item, "生效日期", "effectiveDate"),
             "url": _first(item, "源网址", "url", "原文链接"),
@@ -307,6 +321,7 @@ def build_cards(payload: Any, question_jurisdiction: str = "") -> Dict[str, Any]
     return {
         "question_jurisdiction": question_jurisdiction,
         "sources": cards,
+        "warnings": warnings,
     }
 
 
@@ -336,7 +351,13 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     result = build_cards(payload, question_jurisdiction)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"output": str(out), "sources": len(result["sources"])}, ensure_ascii=False, indent=2))
+    for warning in result.get("warnings") or []:
+        print(f"材料画像告警：{warning}", file=sys.stderr)
+    print(json.dumps({
+        "output": str(out),
+        "sources": len(result["sources"]),
+        "warnings": len(result.get("warnings") or []),
+    }, ensure_ascii=False, indent=2))
     return 0
 
 

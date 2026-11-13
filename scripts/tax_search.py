@@ -239,6 +239,9 @@ def build_semantic_articles(body: Dict[str, Any], search_channel: str = "") -> L
         article.setdefault("检索类型", "tax-semantic")
         if search_channel == "webSearch":
             article["非官方来源"] = True
+            # 外部联网材料统一降权：不依赖接口 dataAuthority 的返回值（可能仍为“权威”）。
+            # 来源性质由 source_cards 按发布机构/域名推断，原始材料不伪造。
+            article["数据权威性"] = "非权威"
         # V2 文号键名是「发文字号」，统一补一份「文号」供下游渲染/核对使用
         if article.get("发文字号") and not article.get("文号"):
             article["文号"] = article["发文字号"]

@@ -184,6 +184,9 @@ def _to_article(item: Dict[str, Any], default_key: str = "") -> Dict[str, Any]:
     """把深度产物条目/可信产物条目归一为检索文章字段（渲染器 source_from_article 契约）。"""
     article = {
         "文章标题": _first_value(item, "文章标题", "title", "标题"),
+        "发布或实施机构": _first_value(
+            item, "发布或实施机构", "发布机关", "publisher", "issuer"
+        ),
         "数据源": _first_value(item, "数据源", "source"),
         "发布日期": _first_value(item, "发布日期", "date"),
         "发布日期可信度": _first_value(item, "发布日期可信度", "date_confidence"),

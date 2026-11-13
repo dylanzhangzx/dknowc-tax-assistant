@@ -479,16 +479,9 @@ def source_from_article(item: Dict[str, Any], index: int, segment: Optional[Dict
             vo.get("title"),
             "未命名来源文章",
         ),
-        "agency": first_str(
-            item.get("unit") if not isinstance(item.get("unit"), list) else "、".join(str(x) for x in item.get("unit")[:3]),
-            item.get("sourceElement"),
-            item.get("数据源"),
-            item.get("发布或实施机构"),
-            item.get("发布机关"),
-            item.get("来源"),
-            vo.get("typeName"),
-            vo.get("sourceName"),
-        ),
+        # 来源卡只展示“发布或实施机构 → 发布机关”；不回退 unit/sourceElement/数据源/来源/
+        # 站点名，缺失就留空，不从标题前缀推导（2026-11-13 口径）。
+        "agency": first_str(item.get("发布或实施机构"), item.get("发布机关")),
         "date": first_str(item.get("发布日期"), item.get("date"), item.get("发布时间"), item.get("createDate"), vo.get("dateTime"), vo.get("createDate")),
         "url": first_str(item.get("sourceUrl"), item.get("source_url"), item.get("源网址"), item.get("原文链接"), item.get("url"), item.get("原文"), vo.get("sourceUrl"), vo.get("url")),
         "policy_url": first_str(item.get("policyUrl"), item.get("policy_url"), vo.get("policyUrl")),
@@ -1609,7 +1602,7 @@ def render_source_card(source: Dict[str, str], for_print: bool = False) -> str:
         vk = f'<span class="sc-vk warn">◐ {reason}</span>'
         note_html = ""
     links = render_source_links(source.get("url"), source.get("policy_url", ""), source.get("snapshot", ""))
-    # 关键性行：有文号（接口 policyFiles 匹配）时"文号 · 数据源 · 日期"，否则"数据源 · 日期"。
+    # 关键性行：有文号（接口 policyFiles 匹配）时"文号 · 发布机构 · 日期"，否则"发布机构 · 日期"。
     # 文号必须是标准格式——政府公文"〔年份〕序号"（杭政函〔2022〕81号）、公告/令类"第X号"
     # （财政部税务总局公告2023年第19号、主席令第三十五号、国务院令第765号，含汉字数字）；
     # 描述性文字（"XX印发"类自造描述）不显示，当无文号处理。
@@ -1694,7 +1687,9 @@ def render_process_bar(stats: Dict[str, Any], verification: Dict[str, Any]) -> s
     # 未传不显示（如实，不虚构）
     rn = stats.get("research_notes") or {}
     rn_bits = ""
-    if rn.get("facts") is not None:
+    if rn.get("parsed") is False:
+        rn_bits = "研究资料未解析 ｜ "
+    elif rn.get("facts") is not None:
         rn_bits = f"研究资料 {rn['facts']} 项事实 · {rn.get('calibers', 0)} 项口径 ｜ "
 
     return f"""
@@ -3118,9 +3113,14 @@ def _next_version_path(path: Path) -> Path:
     raise SystemExit(f"错误：{path.name} 的版本号 _v2~_v99 均已占用，请清理 {path.parent} 后重试。")
 
 
-def parse_research_notes(text: str) -> Dict[str, int]:
-    """统计研究资料 Markdown 的两张表行数：核心事实总表 / 数据口径表。
-    按二级/三级标题分节识别，表格行以 | 开头（跳过表头与 --- 分隔行）；未识别到相应节时计 0。"""
+def parse_research_notes(text: str) -> Dict[str, Any]:
+    """统计研究资料 Markdown 的核心事实/数据口径条目。
+
+    兼容三种常见写法：扁平表格、带小标题的表格、`- ` / `* ` 列表。
+    小标题（三级及以下）不重置当前节，避免模型写“### 一、个人所得税”后统计归零；
+    二级标题若不是事实/口径节才重置。解析不到任何条目时返回 parsed=False + warnings，
+    由调用方提示“研究资料未解析”，不再静默输出 0。
+    """
     facts = 0
     calibers = 0
     current: Optional[str] = None
@@ -3128,30 +3128,50 @@ def parse_research_notes(text: str) -> Dict[str, int]:
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
             head = stripped.lstrip("#").strip()
             if "事实" in head:
                 current = "facts"
             elif "口径" in head or "数据" in head:
                 current = "calibers"
-            else:
+            elif level <= 2:
                 current = None
+            # 三级及以下小标题保留当前节，不打断表格/列表统计
+            continue
+        if current and stripped.startswith(("- ", "* ")):
+            if current == "facts":
+                facts += 1
+            else:
+                calibers += 1
             continue
         if not (current and stripped.startswith("|")):
             continue
         cells = [c.strip() for c in stripped.strip("|").split("|")]
         if cells and all(re.fullmatch(r":?-{2,}:?", c or "") for c in cells):
             continue  # 表头分隔行
-        prev = lines[i - 1].strip() if i > 0 else ""
-        if prev.startswith("|") and i >= 2 and all(
-            re.fullmatch(r":?-{2,}:?", c or "") for c in [x.strip() for x in prev.strip("|").split("|")]
+        next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if next_line.startswith("|") and all(
+            re.fullmatch(r":?-{2,}:?", c or "")
+            for c in [x.strip() for x in next_line.strip("|").split("|")]
         ):
-            continue  # 分隔行的前一行＝表头行，不计数据
+            continue  # 本行是表头行（下一行是分隔行），不计数据
         if any(cells):
             if current == "facts":
                 facts += 1
             else:
                 calibers += 1
-    return {"facts": facts, "calibers": calibers}
+    parsed = bool(facts or calibers)
+    warnings: List[str] = []
+    if not (text or "").strip():
+        warnings.append("研究资料为空")
+    elif not parsed:
+        warnings.append("研究资料未解析：未识别到核心事实/数据口径的表格或列表")
+    return {
+        "facts": facts,
+        "calibers": calibers,
+        "parsed": parsed,
+        "warnings": warnings,
+    }
 
 
 def main() -> None:
@@ -3241,6 +3261,8 @@ def main() -> None:
     if args.research_notes_file:
         _rn_path = _safe_input_path(args.research_notes_file, {".md", ".txt"})
         research_notes = parse_research_notes(_rn_path.read_text(encoding="utf-8"))
+        for warning in research_notes.get("warnings") or []:
+            print(f"研究资料告警：{warning}", file=sys.stderr)
         print(f"研究资料统计：{research_notes['facts']} 项事实 · {research_notes['calibers']} 项口径")
     output.write_text(
         render_html(payload, title, answer_override=answer_override, question_override=args.question,

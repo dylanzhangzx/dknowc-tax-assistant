@@ -59,7 +59,9 @@ BOILERPLATE_PATTERNS = {
 URL_KEYS = ("url", "link", "uri", "sourceUrl", "source_url", "href")
 TITLE_KEYS = ("title", "name", "page_title", "pageTitle")
 CONTENT_KEYS = ("content", "snippet", "summary", "text", "description", "cited_text", "citedText")
-SOURCE_KEYS = ("source", "site_name", "siteName", "publisher", "domain", "display_link", "displayLink")
+SOURCE_KEYS = ("source", "site_name", "siteName", "domain", "display_link", "displayLink")
+# 发布机构单独透传：publisher/issuer 不是站点名，不能混进“数据源”。
+ISSUER_KEYS = ("发布或实施机构", "发布机关", "publisher", "issuer", "organization")
 DATE_KEYS = ("published_at", "publishedAt", "published", "date", "page_age", "pageAge", "datePublished")
 
 
@@ -192,11 +194,13 @@ def _collect(payload) -> tuple:
         title = _first(d, TITLE_KEYS)
         content = _first(d, CONTENT_KEYS)
         source = _first(d, SOURCE_KEYS)
+        issuer = _first(d, ISSUER_KEYS)
         date = _first(d, DATE_KEYS)
         if not (title or content):
             continue
         item = candidates.setdefault(url, {})
-        for key, value in (("title", title), ("content", content), ("source", source), ("date", date)):
+        for key, value in (("title", title), ("content", content), ("source", source),
+                           ("issuer", issuer), ("date", date)):
             if value and not item.get(key):
                 item[key] = value
     for url, item in candidates.items():
@@ -214,6 +218,7 @@ def _make_article(url: str, item: dict, group: str, max_chars: int) -> dict:
         "文章类型": ARTICLE_TYPE,
         "文件标签": ["外部联网"],
         "文章标题": item.get("title") or host or content[:30],
+        "发布或实施机构": item.get("issuer") or "",
         "数据源": item.get("source") or host,
         "发布日期": item.get("date") or "",
         "发布日期可信度": "未标注",

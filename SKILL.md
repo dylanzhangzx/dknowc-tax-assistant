@@ -7,7 +7,7 @@ description: "当用户需要查询税收政策与口径——个人所得税（
 description_zh: "深知税务助手，面向需要把税收政策弄明白、把办税依据找扎实的人——企业财务与办税人员、个体工商户、代账与人力资源从业者，以及需要确认“这项税到底怎么交、能免多少、依据在哪”的个人。它不凭记忆答税率，而是把“这个事项适用哪份文件、哪一条、哪个年度的口径、金额怎么算”一路查到原文。\n\n能查：个人所得税、增值税、企业所得税、税收征管、税收优惠及社保缴费等相邻事项的政策原文；支持按税种/事项聚焦检索，也能按文件名称调取全文核对；对优惠政策的延续、替代与到期关系，按最新公告核对后再下结论。\n\n能算：税额、滞纳金、优惠上限、累计预扣与专项附加扣除等高频计算，逐项列公式、年度口径与假设；税率表与速算扣除数标明适用年度和文件依据，不拿旧年度标准当现行政策。\n\n能核：每个结论挂载政策原文、文号与发布日期，点开可回看；答案写明适用纳税年度，按“文件全称＋文号＋日期”锁定版本；交付前做事实有据、角标绑定、答案一致、时效确认、无未核验断言五项自检，并单独生成一份可逐条核对的溯源核验报告。\n\n交付：直接回答 + 一份含“正文、溯源核验报告、知识专库”三页的单文件 HTML，可导出 Markdown 与 PDF。当前覆盖中国大陆税务，社保作为相邻领域；港澳台及外国税法不在范围，不提供税务筹划方案与涉税鉴证意见。\n\n由北京彩智科技有限公司旗下“深知可信智能”提供。"
 description_en: "dknowc tax assistant is a tax-domain knowledge service Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It covers China mainland taxation (individual income tax, VAT, corporate income tax, tax administration, tax incentives, plus social insurance as an adjacent area), uses trusted search V2 provision-level retrieval with full-path label fencing, pins policy versions by document number and date, and delivers provenance-enabled answers with a three-page HTML traceability report. Answers always state the applicable tax year — never stale rates from model memory."
 category: 财税
-version: "1.0.2"
+version: "1.0.3"
 author: 彩智科技
 permissions:
   network:
@@ -85,4 +85,4 @@ secrets:
 
 ## 目录
 
-`scripts/`（tax_client 接口客户端、tax_search 检索、tag_catalog 标签解析、question_profile 问题画像、source_cards 材料画像、verify_claims 结论校验、calc_tax/calc_period 计算、check_answer 措辞检查、check_release 发布检查、merge/render/deliver/initialize/register）｜`reference/`（按需加载文档 + policy_tags.json 标签目录 + tax_claims.example.json）｜`official-docs/search-results/`（检索、画像、结论、校验落盘，运行期生成）｜`official-docs/output/`（报告，运行期生成）。评测工具与测试集（run_tax_eval、12 题 questions.jsonl、逐题结果）由维护仓库保存，不入 skill 包。变更记录见 `CHANGE_log.md`（维护仓库侧维护）。
+`scripts/`（tax_client 接口客户端、tax_search 检索、tag_catalog 标签解析、question_profile 问题画像、source_cards 材料画像、verify_claims 结论校验、calc_tax/calc_period 计算、check_answer 措辞检查、merge/render/deliver/initialize/register）｜`reference/`（按需加载文档 + policy_tags.json 标签目录 + tax_claims.example.json）｜`official-docs/search-results/`（检索、画像、结论、校验落盘，运行期生成）｜`official-docs/output/`（报告，运行期生成）。评测工具与测试集、发布检查脚本与变更记录由维护仓库保存，不入 skill 包。

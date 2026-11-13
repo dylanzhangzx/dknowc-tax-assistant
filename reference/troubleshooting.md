@@ -40,6 +40,10 @@
 | `次级媒体 external 缺少 official_value 或待核验措辞` | 把媒体报道当官方口径 | 补官方公开口径，或明确写"待核验/未见正式文件" |
 | `答案强断言没有 claim 锚点/引用` | 正文写了结论但没落 claim/角标 | 给该句挂 `[n]` 或写入对应 claim 的 `answer_anchor` |
 | `输出路径必须位于 official-docs/search-results/` | `--output` 越界 | 能力层产物只写 `official-docs/search-results/`，报告写 `official-docs/output/` |
+| `check_answer` 报「税率/征收率」 | 句子里有具体税率数字且同一行没有年度或文号；只写“税率档/税率表”不会报 | 给出 `13%`/`百分之十三`/`13个点` 时补 `2026年` 或文号；假设句无需改写 |
+| 过程条显示「研究资料未解析」 | 研究资料标题/表格格式未识别，或文件为空 | 按 `## 核心事实总表` / `## 数据口径` + 扁平表格或 `- ` 列表重写；不要用三级小标题打断表格 |
+| `initialize.py` 返回 `api_key_invalid` / `ready=false` | Key 格式合法但已失效（401/403） | 按开通引导重新获取 Key；不要用 `--no-verify-key` 绕过 |
+| `initialize.py` 提示「已降级放行」 | 校验请求网络超时/5xx | 可继续，首次检索可能失败；联网后重跑 initialize |
 
 ## 工具侧
 
