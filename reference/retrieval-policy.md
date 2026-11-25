@@ -14,7 +14,7 @@
 ```bash
 python3 scripts/tax_search.py \
   --file "财政部 税务总局关于增值税小规模纳税人减免增值税政策的公告" \
-  -o official-docs/search-results/tax_<任务>_full.json
+  --run ./runs/<任务>-<时间> --output tax_search_full.json
 ```
 
 链路：政策条件筛选（按标题，全名→去"关于"前缀逐步放宽）→ 本地按标题匹配度+状态+日期挑副本 → 历次版本（尽力，失败不阻断）→ 政策正文 → 全文下载。**不做法条切分**——税务没有"按第X条切"的核心诉求，直接返回全文（超 6 万字截断并如实标注）。

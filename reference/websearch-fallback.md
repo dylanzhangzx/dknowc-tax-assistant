@@ -1,6 +1,6 @@
 # 联网检索降级链（三阶段：库内 → 可信联网 → 宿主 WebSearch）
 
-> 检索三阶段、外部材料限用与打标机制与深知可信搜索 1.7.2 **完全一致**（2026-11-10 口径确认）；用户可见标签按能力层规范统一为「外部公开材料 · 政府网站/官方媒体/次级媒体/未知」。报告不出现阶段编号、可信联网、宿主 WebSearch 等内部词；内部字段 `非官方来源=true` 仅表示"库外材料"，不等于网站本身不官方。
+> 检索三阶段、外部材料限用与打标机制与深知可信搜索 1.7.2 **完全一致**（2026-11-10 口径确认）；报告徽标按来源等级展示（内核 1.0.2）：政府域名/官方机构标「公开网络·官方」，其余外部标「非官方来源」；正文依据全部为第三方信源时报告出提醒。报告不出现阶段编号、可信联网、宿主 WebSearch 等内部词；内部字段 `非官方来源=true` 仅表示"库外材料"，不等于网站本身不官方。
 
 ## 默认只查库内
 
@@ -18,30 +18,30 @@
 
 ```bash
 python3 scripts/tax_search.py "用户问题原话" --search-channel webSearch --json-only \
-  -o official-docs/search-results/tax_<任务>_web.json
+  --run ./runs/<任务>-<时间> --output tax_search_web.json
 ```
 
-返回真实互联网网页正文段落＋源网址，**可溯源到原段**；`dataAuthority` 自动开启，文章带 `数据权威性`，脚本自动补内部标记 `非官方来源=true`；渲染层按发布机构/域名区分来源性质，自动打「外部公开材料 · 政府网站/官方媒体/次级媒体/未知」徽标。联网路不使用 `policyLabels`（联网网页不携带库内标签，传了会被全部过滤）。
+返回真实互联网网页正文段落＋源网址，**可溯源到原段**；`dataAuthority` 自动开启，文章带 `数据权威性`，脚本自动补内部标记 `非官方来源=true`；渲染层按来源等级自动打徽标：官方信源「公开网络·官方」，其余「非官方来源」。联网路不使用 `policyLabels`（联网网页不携带库内标签，传了会被全部过滤）。
 
 **阶段三：宿主 WebSearch**——阶段二零结果，或结果只覆盖其他方向，或核心事实仍无直接支撑时：
 
 1. 用用户原话＋定向变体调用宿主 WebSearch（宿主无此工具时停在阶段二并如实说明，不得伪造外部材料）；
-2. 把结果按统一契约落成 `official-docs/search-results/tax_websearch_raw.json`：
+2. 把结果按统一契约落成运行目录内的 `tax_websearch_raw.json`：
    `{"query": "检索词", "results": [{"title": "…", "url": "https://…", "content": "…", "published_at": "可选", "source": "可选"}]}`。
    不同宿主的包装结构可直接传入，转换器会递归识别；**只有标题+链接、没有 `content/snippet/cited_text` 的条目会被丢弃**，只能当线索、不可引用。
 3. 转换并合并（该路 `--search-key "公开资料补充"`；没有阶段二产物时只传外部联网这一路，阶段一产物同样并入）：
 
 ```bash
-python3 scripts/websearch_convert.py official-docs/search-results/tax_websearch_raw.json \
-  --query "用户问题原话" -o official-docs/search-results/tax_websearch_converted.json
-python3 scripts/merge_search_results.py \
-  --input official-docs/search-results/tax_<任务>_web.json --search-key "补充检索" \
-  --input official-docs/search-results/tax_websearch_converted.json --search-key "公开资料补充" \
-  --output official-docs/search-results/tax_<任务>_merged.json
+python3 scripts/websearch_convert.py tax_websearch_raw.json \
+  --query "用户问题原话" --run ./runs/<任务>-<时间> -o tax_websearch_converted.json
+python3 scripts/merge_search_results.py --run ./runs/<任务>-<时间> \
+  --input tax_search_web.json --search-key "补充检索" \
+  --input tax_websearch_converted.json --search-key "公开资料补充" \
+  --output tax_merged.json
 ```
 
 4. 用合并产物渲染唯一 HTML；**先 merge、后写答案**，外部材料角标编号以合并产物 `编号` 为准。
-5. 正文页由渲染器自动加统一来源提示条（本页部分材料为外部公开材料，已标注来源性质）；材料卡/引文胶囊/打印版逐条打「外部公开材料 · 政府网站/官方媒体/次级媒体/未知」；聊天回复用自然语言说明"据外部公开材料（来源性质：……）"。
+5. 正文页由渲染器自动加统一来源提示条（"本页部分材料来自公开网络第三方信源…"或官方信源单独提示）；材料卡/引文胶囊逐条打「公开网络·官方」或「非官方来源」徽标；聊天回复用自然语言说明"据公开网络材料（已标注来源）"。
 
 **引用纪律**：有原段（库内／联网模式）的优先于 WebSearch 结果；引用联网材料前剥离网页模板文字（导航／客服电话／面包屑——接口不做模板清洗）；外部材料只补充库内缺失的事实（尤其地方口径线索、外部原文线索），核心结论仍以库内／官方材料为主，**不得让外部材料单独支撑"已核验"结论**。
 
@@ -51,9 +51,9 @@ python3 scripts/merge_search_results.py \
 
 ## 用户可见口径
 
-1. 材料卡/引文胶囊：`外部公开材料 · 政府网站/官方媒体/次级媒体/未知` 徽标；数据权威性=非权威（渲染器自动，无需手改）；
+1. 材料卡/引文胶囊：「公开网络·官方」或「非官方来源」徽标（内核自动）；数据权威性=非权威（联网路脚本写入）；
 2. 正文页统一提示条（渲染器自动）；
-3. 聊天回复："据外部公开材料（来源性质：政府网站/官方媒体/次级媒体/未知）"；
-4. **禁止用户可见**："阶段一/二/三""可信联网""外部联网""宿主 WebSearch""非官方来源"等内部词；自检说明里用"外部公开材料/公开网络材料"；
+3. 聊天回复："据公开网络材料（来源已标注，请以官方口径复核）"；
+4. **禁止用户可见**："阶段一/二/三""可信联网""外部联网""宿主 WebSearch"等内部词；「非官方来源」「公开网络·官方」是正式徽标用语，可直接出现；
 5. 检索分组标签：外部路用 `--search-key "补充检索"` / `"公开资料补充"`（与可信搜索一致）；
 6. 官方优先：同一 URL 同时有官方/库内材料与外部材料时，官方材料整体胜出，外部段落与元数据不进入官方材料卡（merge 已实现）。

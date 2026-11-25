@@ -16,7 +16,7 @@ tax_verify.json               通用校验（地域/税种/时点/来源/引文/
 tax_answer.txt → HTML
 ```
 
-三个脚本的 `--input/--profile/--answer` 只能读 skill 目录内文件；`--output` 只能写 `official-docs/search-results/`。越界路径直接拒绝。
+四个产物都写在会话工作区的运行目录：首次用 `--out ./runs/<任务>-<时间>` 建目录，后续用 `--run` 打开同一目录；`--output` 只接裸文件名，同名不覆盖。输出指向 Skill 安装目录（含 `official-docs/`）直接拒绝。
 
 ## 1. 问题画像
 
@@ -24,7 +24,7 @@ tax_answer.txt → HTML
 python3 {baseDir}/scripts/question_profile.py \
   --question "2026年北京市大兴区小规模纳税人月销售额10万元以下还免征增值税吗？" \
   --as_of 2026-11-10 \
-  --output tax_question_profile.json
+  --out ./runs/20261120-B01-1 --output tax_question_profile.json
 ```
 
 输出字段：
@@ -50,9 +50,9 @@ Agent 也可以手写 profile，再用 `--input` 校验；但 `jurisdiction` 和
 
 ```bash
 python3 {baseDir}/scripts/source_cards.py \
-  --input tax_<任务>_merged.json \
-  --profile tax_question_profile.json \
-  --output tax_source_cards.json
+  --input ./runs/20261120-B01-1/tax_merged.json \
+  --profile ./runs/20261120-B01-1/tax_question_profile.json \
+  --out ./runs/20261120-B01-1 --output tax_source_cards.json
 ```
 
 每篇材料变成：
@@ -83,7 +83,7 @@ python3 {baseDir}/scripts/source_cards.py \
 - 全国结论不得引用地方来源（河北的公告不能支撑全国口径）；地方结论也不得引用其他辖区来源；
 - `source_grade`：库内=`官方库`；外部按 `source_nature` 取 `政府网站 / 官方媒体 / 次级媒体 / 未知`；
 - `非官方来源=True` 只表示"不是深知库内材料"，**不等于网站本身不官方**：政府网站、官方媒体要如实区分，无法判断写"未知"，不要合并成"次级媒体/未知"；
-- `source_nature` 只允许 `政府网站 / 官方媒体 / 次级媒体 / 未知`；用户可见标签为 `外部公开材料 · 政府网站/官方媒体/次级媒体/未知`；`source_nature_status` 标明该值是接口显式给出（`explicit`）还是按机构/域名推断（`inferred`）；
+- `source_nature` 只允许 `政府网站 / 官方媒体 / 次级媒体 / 未知`（内部画像字段，用于 verify_claims 判级与提醒；用户可见徽标按内核来源等级展示「公开网络·官方」／「非官方来源」）；`source_nature_status` 标明该值是接口显式给出（`explicit`）还是按机构/域名推断（`inferred`）；
 - 外部材料 `data_authority` 一律为 `非权威`（不跟随接口 dataAuthority）；`library_material=false` 表示库外材料，`official` 仍按来源本身是否为政府网站/官方媒体判断；
 - `issuer` 只取「发布或实施机构 → 发布机关」；不回退 `数据源`/站点名，缺失就留空，不从标题前缀推导；
 - `doc_type` 区分政策原文、公告、解读、新闻报道，避免把新闻当条文；
@@ -162,11 +162,11 @@ python3 {baseDir}/scripts/calc_tax.py --mode reduction --tax 10000 --reduction 5
 
 ```bash
 python3 {baseDir}/scripts/verify_claims.py \
-  --claims tax_claims.json \
-  --sources tax_source_cards.json \
-  --profile tax_question_profile.json \
-  --answer tax_answer.txt \
-  --output tax_verify.json
+  --claims ./runs/20261120-B01-1/tax_claims.json \
+  --sources ./runs/20261120-B01-1/tax_source_cards.json \
+  --profile ./runs/20261120-B01-1/tax_question_profile.json \
+  --answer ./runs/20261120-B01-1/tax_answer.txt \
+  --out ./runs/20261120-B01-1 --output tax_verify.json
 ```
 
 检查的是通用不变量，不是具体错题：
@@ -184,7 +184,20 @@ python3 {baseDir}/scripts/verify_claims.py \
 
 `verdict` 非 `pass` 不得生成最终报告。
 
-## 6. 和 `check_answer.py` 的分工
+## 6. 报告核验状态（两轨验收，不合格不出报告）
+
+渲染内核来自上游「溯源核验报告生成器」（整体继承，不改内核；配置走 `reference/trace_report.config.json`）。
+
+**结论 = 结构核验（脚本）∧ AI 验收（Agent）；任一轨不过，渲染器退出 1 且不写 HTML**——未通过时应该解决问题，而不是输出问题报告；交付物只有“已核验”一种形态。
+
+- **结构核验（脚本轨）**：角标全绑、每条正文依据有可展开摘录、不可引用材料不作依据、自检格式合法且“通过”带可回查证据、域内核验记录指纹有效（`tax_verify.json` 缺失/fail/失效即拦）。
+- **AI 验收（Agent 轨）**：五项结构化 selfCheck（见 `answer-and-report.md`），`fail` 否决；声明“通过”但证据无可回查要素 → “证据不足”按结构违约拦截；`pending` 只待复核不否决。AI 轨不能翻案脚本轨。
+- **来源等级**：外部官方信源（gov 域名/官方机构名，`is_official_external` 判定，白名单走 config `official_host_allow`）可作正文依据、标「公开网络·官方」；正文依据全部为第三方信源时出提醒。
+- **脚本不做内容判断**：claim_audit 内容轨已随内核删除（无 hints）；数字/标准号/地域/金额对象/措辞等语义判断全部归 AI 验收。
+
+**域内核验记录（`--verify-file`）**：`verify_claims.py` 落盘 `{verdict, issues, record:{answer_digest, evidence_digest, verdict}}`——`record` 由 `trust_digest.py` 计算（答案角标规范化摘要 + 证据 (编号,源网址) 集合摘要，证据侧复刻渲染器 renumber 后的编号），渲染时与当前答案/材料复算比对，不一致即“核验记录与当前答案/证据不一致”拦截；改了答案、补查换了材料必须重跑 `verify_claims.py` 再渲染，不允许拿旧记录出“已核验”。
+
+## 7. 和 `check_answer.py` 的分工
 
 - `verify_claims.py`：结论图校验，核心闸门。
 - `check_answer.py`：措辞检查（绝对化、未注明假设、台账数量等），辅助闸门。

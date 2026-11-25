@@ -32,9 +32,10 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import calc_tax
+import run_dir
+import trust_digest
 from calc_period import build_result as calc_period_build_result
 from calc_period import parse_date, parse_decimal, parse_rate
-from path_guard import safe_read_path, safe_write_path
 from question_profile import CITY_PROVINCE
 
 TYPES = {"direct", "calculation", "negative", "inference", "external", "interpretation"}
@@ -49,10 +50,6 @@ STRONG_TERMS = (
 CALC_TOOLS = ("calc_tax.py", "calc_period.py")
 _ENUM_CN = re.compile(r"[（(]\s*([一二三四五六七八九十]+)\s*[）)]")
 _ENUM_NUM = re.compile(r"(?m)^\s*(\d{1,2})[.、]\s*")
-
-
-def _load(path: str) -> Any:
-    return json.loads(safe_read_path(path).read_text(encoding="utf-8"))
 
 
 def _items(data: Any) -> List[Dict[str, Any]]:
@@ -492,31 +489,82 @@ def verify(claims: List[Dict[str, Any]], sources: List[Dict[str, Any]],
     return {"verdict": "pass" if not issues else "fail", "issues": issues, "items": item_results}
 
 
+def _renderer_evidence_items(sources: List[Dict[str, Any]], answer: str) -> List[Dict[str, str]]:
+    """复刻渲染器 renumber_citations 之后的 (id, url) 集合（trust_digest 口径）。
+
+    渲染器：材料 id = 合并产物「编号」；被引编号按答案首现顺序重排为 1..N，
+    未引用材料按原顺序顺延。两侧顺序都来自同一份合并产物，天然对齐。
+    """
+    cited: List[str] = []
+    for m in re.finditer(r"\[(\d+)\]", answer or ""):
+        if m.group(1) not in cited:
+            cited.append(m.group(1))
+    mapping = {old: str(i + 1) for i, old in enumerate(cited)}
+    next_id = len(mapping)
+    items: List[Dict[str, str]] = []
+    for idx, s in enumerate(sources, start=1):
+        no = str(s.get("article_no") or "").strip() or str(idx)
+        if no in mapping:
+            key = mapping[no]
+        else:
+            next_id += 1
+            key = str(next_id)
+        items.append({"id": key, "url": s.get("url") or ""})
+    return items
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="问题画像 + 材料画像 + claim 通用校验")
     parser.add_argument("--claims", required=True)
     parser.add_argument("--sources", required=True)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--answer", default="")
-    parser.add_argument("--output", default="tax_verify.json")
+    parser.add_argument("--out", help="运行目录（会话工作区）；与 --output 文件名一起用")
+    parser.add_argument("--output", default="tax_verify.json",
+                        help="输出文件名（配合 --out）或显式输出路径（不得指向 Skill 安装目录）")
     args = parser.parse_args()
 
+    def _load_in(value: str) -> Any:
+        return json.loads(
+            run_dir.resolve_run_input(value, args.out).read_text(encoding="utf-8")
+        )
+
     try:
-        claims = _items(_load(args.claims))
-        sources = _items(_load(args.sources))
-        profile = _load(args.profile)
+        claims = _items(_load_in(args.claims))
+        sources = _items(_load_in(args.sources))
+        profile = _load_in(args.profile)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"输入不可读：{exc}", file=sys.stderr)
         return 1
     try:
-        answer = safe_read_path(args.answer).read_text(encoding="utf-8") if args.answer else ""
+        answer = (
+            run_dir.resolve_run_input(args.answer, args.out).read_text(encoding="utf-8")
+            if args.answer else ""
+        )
     except (OSError, ValueError) as exc:
         print(f"答案不可读：{exc}", file=sys.stderr)
         return 1
     result = verify(claims, sources, profile, answer)
+    # 摘要绑定（上游 trust_digest 口径，1.0.2 内核继承）：渲染端按同一算法复算，
+    # 不一致即“核验记录已失效”。证据侧复刻渲染器 renumber 后的 (id, url)——
+    # 渲染器把被引材料按角标首现重排为 1..N、未引用顺延编号，这里必须同构，
+    # 否则会“永远 stale”。
+    result["record"] = {
+        "answer_digest": trust_digest.answer_digest(answer),
+        "evidence_digest": trust_digest.evidence_digest(
+            _renderer_evidence_items(sources, answer)
+        ),
+        "verdict": result["verdict"],
+    }
+    # 顶层摘要保留（旧消费者/排查用），权威字段是 record.*
+    result["answer_digest"] = result["record"]["answer_digest"]
+    result["evidence_digest"] = result["record"]["evidence_digest"]
+    result["profile_digest"] = trust_digest.answer_digest(
+        json.dumps(profile, ensure_ascii=False, sort_keys=True)
+    )
 
     try:
-        out = safe_write_path(args.output)
+        out = run_dir.resolve_write_target(args.output, args.out)
     except ValueError as exc:
         parser.error(str(exc))
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -21,10 +21,10 @@ data.searches[] 形态）多路 + 可信搜索补搜（tax_search.py，content.d
   数组位置）。**写答案时读 `编号` 字段，不要按"某一路材料清单里的第几条"编号。**
 
 用法：
-  python3 scripts/merge_search_results.py \
-      --input official-docs/search-results/route1.json --search-key "政策依据路" \
-      --input official-docs/search-results/route2.json --search-key "数据口径路" \
-      --output official-docs/search-results/merged_all.json
+  python3 scripts/merge_search_results.py --run ./runs/<任务>-<时间> \
+      --input route1.json --search-key "政策依据路" \
+      --input route2.json --search-key "数据口径路" \
+      --output merged_all.json
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+import run_dir
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 SEARCH_RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
@@ -257,9 +259,11 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="多路检索结果合并（可信/深度混合 → 渲染器统一形态）")
-    parser.add_argument("--input", action="append", required=True, help="输入 JSON（可多次传入，每路一个）")
+    parser.add_argument("--input", action="append", required=True,
+                        help="输入 JSON（可多次传入，每路一个；相对路径按 --run 运行目录、其次当前工作目录解析）")
     parser.add_argument("--search-key", action="append", help="对应 --input 路次的搜索条件分组标签（可多次，缺省自动）")
-    parser.add_argument("--output", "-o", help="输出文件名，默认 official-docs/search-results/merged_all.json")
+    parser.add_argument("--run", help="运行目录（会话工作区）；合并产物写进该目录")
+    parser.add_argument("--output", "-o", help="输出文件名（配合 --run）或显式输出路径（不得指向 Skill 安装目录）")
     args = parser.parse_args()
 
     if args.search_key and len(args.search_key) != len(args.input):
@@ -271,10 +275,24 @@ def main() -> None:
     by_key: Dict[str, Dict[str, Any]] = {}
     total_in = 0
 
+    run_path = None
+    if args.run:
+        try:
+            run_path = run_dir.open_run_dir(args.run, "--run")
+        except ValueError as exc:
+            raise SystemExit(f"错误：{exc}") from None
+
     for _ri, (input_path_str, key) in enumerate(zip(args.input, keys)):
         raw_path = Path(input_path_str).expanduser()
         if not raw_path.is_absolute():
-            raw_path = (SEARCH_RESULTS_DIR / raw_path.name).resolve()
+            # 新口径：优先按 --run 运行目录内的文件名解析，其次当前工作目录；
+            # 兼容旧产物：都找不到时回退 Skill 内历史结果目录（只读）。
+            candidates = []
+            if run_path is not None:
+                candidates.append((run_path / raw_path).resolve())
+            candidates.append((Path.cwd() / raw_path).resolve())
+            candidates.append((SEARCH_RESULTS_DIR / raw_path.name).resolve())
+            raw_path = next((p for p in candidates if p.is_file()), candidates[0])
         if not raw_path.is_file():
             raise SystemExit(f"错误：输入文件不存在: {raw_path}")
         before = len(articles)
@@ -522,13 +540,19 @@ def main() -> None:
         pf_out.append(p)
 
     out_name = args.output or "merged_all.json"
-    out = Path(out_name).expanduser()
-    if not out.is_absolute():
-        out = (SEARCH_RESULTS_DIR / out.name).resolve()
     try:
-        out.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        raise SystemExit(f"错误：输出文件必须位于 {SEARCH_RESULTS_DIR}") from None
+        if args.run:
+            run = run_dir.open_run_dir(args.run, "--run")
+            out = run_dir.out_file(run, out_name)
+        else:
+            if not args.output:
+                raise ValueError(
+                    "未提供输出位置：请用 --run 指定运行目录（+ --output 文件名），"
+                    "或用 --output 传显式输出路径（不得指向 Skill 安装目录）"
+                )
+            out = run_dir.resolve_output_path(out_name)
+    except ValueError as exc:
+        raise SystemExit(f"错误：{exc}") from None
 
     result = {
         "search_meta": {"merged": True, "input_routes": len(args.input), "merged_from": [str(Path(x).name) for x in args.input]},

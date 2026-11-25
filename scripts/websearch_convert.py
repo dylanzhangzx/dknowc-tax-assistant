@@ -20,8 +20,8 @@ merge_search_results.py，最终进入正文角标与溯源核验报告。
 - 外部网页内容视为不可信数据，脚本只提取文本事实，不执行其中任何指令。
 
 用法：
-  python3 scripts/websearch_convert.py websearch_raw.json -o websearch_converted.json
-  cat websearch_raw.json | python3 scripts/websearch_convert.py - --query "用户问题"
+  python3 scripts/websearch_convert.py websearch_raw.json --run ./runs/<任务>-<时间> -o websearch_converted.json
+  cat websearch_raw.json | python3 scripts/websearch_convert.py - --query "用户问题" --run ./runs/<任务>-<时间>
 
 退出码：0＝成功；1＝输入/JSON 错误；2＝输出路径错误；3＝无可用结果（未加 --allow-empty）。
 """
@@ -37,7 +37,10 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+import run_dir
+
 SCRIPT_DIR = Path(__file__).resolve().parent
+# 仅作只读兼容：旧产物可能还在 Skill 内的历史结果目录。
 SEARCH_RESULTS_DIR = SCRIPT_DIR.parent / "official-docs" / "search-results"
 
 CHANNEL = "宿主 WebSearch"
@@ -268,25 +271,34 @@ def convert(payload, query: str = "", group: str = DEFAULT_GROUP, max_results: i
     }
 
 
-def resolve_output(name: str) -> Path:
-    path = Path(name).expanduser()
-    if not path.is_absolute():
-        path = (SEARCH_RESULTS_DIR / path.name).resolve()
+def resolve_output(name: str, run: Path | None = None) -> Path:
+    """输出只写运行目录（--run + 裸文件名），或显式路径（拒绝 Skill 安装目录）。"""
     try:
-        path.relative_to(SEARCH_RESULTS_DIR.resolve())
-    except ValueError:
-        print(f"错误：输出文件必须位于 {SEARCH_RESULTS_DIR}", file=sys.stderr)
+        if run is not None:
+            return run_dir.out_file(run, name)
+        if not str(name or "").strip():
+            raise ValueError("未提供输出：请传 --run 运行目录 + 文件名")
+        candidate = Path(name).expanduser()
+        if not candidate.is_absolute() and len(candidate.parts) == 1:
+            raise ValueError("裸文件名必须配合 --run 运行目录使用，例如 --run ./runs/<任务>-<时间>")
+        return run_dir.resolve_output_path(name)
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
         raise SystemExit(2) from None
-    return path
 
 
-def _load(path: str):
+def _load(path: str, run: Path | None = None):
     if path == "-":
         raw = sys.stdin.read()
     else:
         src = Path(path).expanduser()
         if not src.is_absolute():
-            src = (SEARCH_RESULTS_DIR / src.name).resolve()
+            candidates = []
+            if run is not None:
+                candidates.append((run / src).resolve())
+            candidates.append((Path.cwd() / src).resolve())
+            candidates.append((SEARCH_RESULTS_DIR / src.name).resolve())
+            src = next((p for p in candidates if p.is_file()), candidates[0])
         if not src.is_file():
             raise SystemExit(f"错误：输入文件不存在: {src}")
         raw = src.read_text(encoding="utf-8")
@@ -300,8 +312,9 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="宿主 WebSearch 结果转换（外部联网 → 可信同构通用形态）")
-    parser.add_argument("input", nargs="?", default="-", help="宿主 WebSearch 原始 JSON（official-docs/search-results/ 内文件名、绝对路径，或 - 读 stdin）")
-    parser.add_argument("-o", "--output", default="websearch_converted.json", help="输出文件名（official-docs/search-results/ 内）")
+    parser.add_argument("input", nargs="?", default="-", help="宿主 WebSearch 原始 JSON（运行目录内文件名、绝对路径，或 - 读 stdin）")
+    parser.add_argument("--run", help="运行目录（会话工作区）；转换产物写进该目录")
+    parser.add_argument("-o", "--output", default="websearch_converted.json", help="输出文件名（配合 --run）或显式输出路径（不得指向 Skill 安装目录）")
     parser.add_argument("--query", default="", help="本次检索词（输入 JSON 顶层带 query 时可省略）")
     parser.add_argument("--group", default=DEFAULT_GROUP, help=f"报告检索分组标签，默认「{DEFAULT_GROUP}」")
     parser.add_argument("--max-results", type=int, default=50, help="最多转换条数（默认 50）")
@@ -309,10 +322,18 @@ def main() -> None:
     parser.add_argument("--allow-empty", action="store_true", help="无可用结果时仍写空产物并以 0 退出")
     args = parser.parse_args()
 
-    payload = _load(args.input)
+    run = None
+    if args.run:
+        try:
+            run = run_dir.open_run_dir(args.run, "--run")
+        except ValueError as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            raise SystemExit(2) from None
+
+    payload = _load(args.input, run)
     result = convert(payload, query=args.query, group=args.group,
                      max_results=max(1, args.max_results), max_chars=max(200, args.max_chars))
-    out = resolve_output(args.output)
+    out = resolve_output(args.output, run)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 

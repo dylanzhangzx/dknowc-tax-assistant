@@ -39,9 +39,20 @@
 | `negative 缺少 coverage` / `wording` | 只写"没找到" | 写清检索覆盖与"截至YYYY-MM-DD，公开渠道未见……" |
 | `次级媒体 external 缺少 official_value 或待核验措辞` | 把媒体报道当官方口径 | 补官方公开口径，或明确写"待核验/未见正式文件" |
 | `答案强断言没有 claim 锚点/引用` | 正文写了结论但没落 claim/角标 | 给该句挂 `[n]` 或写入对应 claim 的 `answer_anchor` |
-| `输出路径必须位于 official-docs/search-results/` | `--output` 越界 | 能力层产物只写 `official-docs/search-results/`，报告写 `official-docs/output/` |
+| `--out/--run 不能指向 Skill 安装目录内` | 把输出写回安装目录 | 换会话工作区的运行目录，如 `./runs/<任务>-<时间>`；Skill 目录只读 |
+| `--out 目录已有运行结果` | 想复用旧目录跑新任务 | 新建独立 run；续跑/补查用 `--run`，不要复用已有 run |
+| `--output 文件已存在，不覆盖已有产物` | 同一 run 重跑同名产物 | 换文件名（如 `_v2`）或新建 run；报告同题重跑会自动 `_v2` 另存 |
+| 渲染报错「核验未通过，未生成报告」 | 结构轨或 AI 验收轨任一不过 | 按 stderr 列出的原因逐条修正（补角标/补摘录/重跑 verify/补 selfCheck 证据）后重跑；不产出问题报告 |
+| 渲染报错「核验记录与当前答案/证据不一致」 | 答案或材料在核验后被改动（trust_digest 摘要不匹配） | 重跑 `verify_claims.py` 生成新 `tax_verify.json` 再渲染；不允许沿用旧绿标 |
+| 渲染报错「缺少核验记录」 | 没传 `--verify-file` 且运行目录无 tax_verify.json | 传运行目录内的 `tax_verify.json`；不要靠手写 selfcheck 顶替域内核验 |
+| 「AI 验收有声明通过但无可回查证据的项」 | selfCheck 声明通过但 evidence 无要素 | 每项 evidence 补材料编号/条款号/文号/日期/标准号（见 answer-and-report.md 契约） |
+| 渲染报错「只认通用 JSON / 请先用 build_report_input 转换」 | 直接把 merge 产物喂给渲染器 | 先 `build_report_input.py <merge> --run <run> --output input.json` 转换，再渲染 input.json |
+| 渲染报错「必须用 --run 指定…」 | 没传 `--run` | 渲染/转换统一传 `--run <运行目录>`（相对产物落 run 内） |
+| 「AI 验收有未通过项」 | selfCheck 某项 verdict=fail | 修正答案或补检索，把该项改为 pass 并附证据后重跑 |
+| challenge 走了领题流程（输出带 question） | 注册通行码失效/停用，脚本已自动回落 | 按原领题流程答 `answer` 即可；输出 `keyFallback` 会标明原因 |
+| challenge 返回 SMS_RATE_LIMIT / RESULT_UNKNOWN | 限频或发送结果未确认 | 停点：等用户明确要求或确认收到短信，不自动重发（回落等于再发一次） |
 | `check_answer` 报「税率/征收率」 | 句子里有具体税率数字且同一行没有年度或文号；只写“税率档/税率表”不会报 | 给出 `13%`/`百分之十三`/`13个点` 时补 `2026年` 或文号；假设句无需改写 |
-| 过程条显示「研究资料未解析」 | 研究资料标题/表格格式未识别，或文件为空 | 按 `## 核心事实总表` / `## 数据口径` + 扁平表格或 `- ` 列表重写；不要用三级小标题打断表格 |
+| 研究资料统计显示 0 项 | 内核 1.0.2 解析器只统计「事实/口径」关键词分节下的**表格行**（三级标题会重置分节，列表不计数） | 按 `## 核心事实总表` / `## 数据口径` 二级标题 + 扁平表格重写；表格直接放二级标题下，不用列表、不套三级小标题 |
 | `initialize.py` 返回 `api_key_invalid` / `ready=false` | Key 格式合法但已失效（401/403） | 按开通引导重新获取 Key；不要用 `--no-verify-key` 绕过 |
 | `initialize.py` 提示「已降级放行」 | 校验请求网络超时/5xx | 可继续，首次检索可能失败；联网后重跑 initialize |
 

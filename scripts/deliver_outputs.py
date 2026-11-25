@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """把本次任务产出物复制到用户可见的工作目录（WorkBuddy 等宿主环境）。
 
-产出物默认生成在 skill 安装目录的 official-docs/output/，宿主（如 WorkBuddy）
+产出物生成在会话工作区的运行目录（--run），宿主（如 WorkBuddy）
 只向用户展示其工作区目录中的文件，导致用户看不到交付物。本脚本自动探测
 宿主工作区，把刚生成的文件复制过去并输出用户可见路径。
+只交付 .html/.htm（answer.md、v1_report.md 等中间文件由白名单硬闸门拒绝）。
 
 探测分两步：先识别宿主身份（detect_host），再定位该宿主的工作区。
 
@@ -34,9 +35,10 @@ WorkBuddy 那版交付物。宿主未知时宁可不复制。
 文件——内容不同时自动改名为"名字_v2.扩展名"（依次 _v3、_v4…），内容相同则跳过。
 
 用法：
+  python3 scripts/deliver_outputs.py --run <运行目录> [--dest <目录>]
   python3 scripts/deliver_outputs.py <文件1> [文件2 ...] [--dest <目录>]
   python3 scripts/deliver_outputs.py --probe    # 只输出宿主识别证据，不复制文件
-  文件路径为空时，自动复制 official-docs/output/ 下最近 10 分钟内新建的文件。
+  文件路径为空时，自动复制 --run 运行目录下最近 10 分钟内新建的 HTML。
 """
 
 from __future__ import annotations
@@ -53,7 +55,6 @@ import time
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = SKILL_ROOT / "official-docs" / "output"
 RECENT_WINDOW_SECONDS = 10 * 60
 # 只交付面向用户的最终产物：本 skill 唯一交付物是溯源核验报告 HTML；
 # output/ 里的正文 Markdown/TXT（render 的 --answer-file 中间文件）不交付、不复制
@@ -426,21 +427,32 @@ def copy_without_overwrite(src: Path, dest: Path) -> dict:
     }
 
 
-def collect_files(args_files: list[str]) -> list[Path]:
+def collect_files(args_files: list[str], run_dir_path: str = "") -> list[Path]:
+    """收集待交付产物（2026-11-20 运行目录口径）：
+    - 显式传入：相对路径按当前工作目录（或 --run 运行目录）解析；
+    - 为空：只在 --run 运行目录里取最近窗口内新建的 HTML（不再扫 skill 安装目录，
+      official-docs/output/ 不再是产物落点）；
+    - answer.md / v1_report.md 等非 HTML 中间文件由交付白名单硬闸门拒绝。
+    """
+    run = Path(run_dir_path).resolve() if run_dir_path else None
     if args_files:
         files = []
         for name in args_files:
             p = Path(name).expanduser()
             if not p.is_absolute():
-                p = (SKILL_ROOT / p).resolve() if (SKILL_ROOT / p).is_file() else p.resolve()
+                candidates = []
+                if run is not None:
+                    candidates.append(run / p.name)
+                candidates.append(Path.cwd() / p)
+                p = next((c.resolve() for c in candidates if c.is_file()), candidates[-1].resolve())
             files.append(p)
         return files
-    # 未指定文件：取 output 目录最近窗口内新建的文件（按交付后缀白名单过滤，
-    # 防止 output/ 里的正文 .md/.txt 中间文件被自动当作交付物）
+    if run is None:
+        return []
     now = time.time()
     files = []
-    if OUTPUT_DIR.is_dir():
-        for p in sorted(OUTPUT_DIR.iterdir()):
+    if run.is_dir():
+        for p in sorted(run.iterdir()):
             if (p.is_file() and (now - p.stat().st_mtime) < RECENT_WINDOW_SECONDS
                     and p.suffix.lower() in ALLOWED_DELIVERY_SUFFIXES):
                 files.append(p)
@@ -453,6 +465,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="复制产出物到宿主工作区（如 WorkBuddy）")
     parser.add_argument("files", nargs="*",
                         help="要复制的产出物路径（建议始终显式传入）；为空时仅在 output 目录近期文件唯一时自动选取，多个候选会拒绝执行以防串任务")
+    parser.add_argument("--run", help="运行目录（会话工作区）；产物 HTML 在该目录内，未指定文件时也从该目录取")
     parser.add_argument("--dest", help="宿主工作区目录（探测失败或需要明确指定时使用）")
     parser.add_argument("--probe", action="store_true", help="只输出宿主识别证据，不复制文件")
     args = parser.parse_args()
@@ -479,7 +492,7 @@ def main() -> int:
         return 0
 
     dest, host_env, dest_source, need_dest, candidates = detect_dest(args.dest, host)
-    files = collect_files(args.files)
+    files = collect_files(args.files, args.run)
 
     results = []
     if need_dest and dest_source == "ambiguous":
@@ -494,11 +507,16 @@ def main() -> int:
     elif dest_source == "unknown":
         # 宿主未知（非 WorkBuddy、非豆包）：交付物保留在 skill 输出目录，不复制
         # （不做宿主猜测，用户可自行从 skill output 取文件）
-        note = (f"未识别宿主环境（非 WorkBuddy / 豆包），交付物保留在 skill 输出目录 {OUTPUT_DIR}，"
+        _kept = args.run or "当前运行目录"
+        note = (f"未识别宿主环境（非 WorkBuddy / 豆包），交付物保留在运行目录 {_kept}，"
                 "不复制到其他位置。")
     elif not files:
-        note = "没有找到可交付的产出物"
-        results.append({"copied": False, "error": "没有找到可交付的产出物"})
+        if not args.run and not args.files:
+            note = "未提供 --run 运行目录，也没有显式传入产出物路径：请用 --run <运行目录> 指定本次任务的产物位置。"
+            results.append({"copied": False, "error": "缺少 --run 或产出物路径"})
+        else:
+            note = "没有找到可交付的产出物（只交付 .html/.htm）"
+            results.append({"copied": False, "error": "没有找到可交付的产出物"})
     elif not args.files and len(files) > 1:
         # 未显式指定文件、且 output 目录里同时有多个近期产物：不猜，要求显式指定
         # （2026-09-21 修复：此前会把上一任务的产物一起交付，造成串任务）
@@ -513,7 +531,7 @@ def main() -> int:
             print(json.dumps({
                 "host_env": False, "host": host, "host_evidence": host_evidence,
                 "need_dest": True, "dest_source": "dest-unusable",
-                "dest": str(dest), "skill_output_dir": str(OUTPUT_DIR),
+                "dest": str(dest), "skill_output_dir": (str(Path(args.run).resolve()) if args.run else ""),
                 "note": (f"无法使用交付目录 {dest}（{exc}）。请确认 --dest 指向一个可用目录后重跑；"
                          "在复制成功前不要向用户交付 skill 内部路径。"),
                 "files": [{"copied": False, "error": str(exc)}],
@@ -533,15 +551,28 @@ def main() -> int:
                               "不得作为交付物展示或复制（导出 Markdown/PDF 由用户在 HTML 顶栏自助操作）。"),
                 })
                 continue
+            # 2026-11-20 运行目录口径：产物只从会话工作区的运行目录取，
+            # 不再从 skill 安装目录（official-docs/）交付。
             try:
-                src.resolve().relative_to(OUTPUT_DIR.resolve())
+                src.resolve().relative_to(SKILL_ROOT.resolve())
             except ValueError:
+                pass
+            else:
                 results.append({
                     "copied": False, "source": str(src),
-                    "error": (f"交付源文件必须位于 {OUTPUT_DIR}/。"
-                              "不得从宿主会话目录或 skill 其它目录直接交付。"),
+                    "error": ("交付源文件不能位于 Skill 安装目录内。"
+                              "请用 --run 指定本次任务的运行目录（会话工作区）后重跑。"),
                 })
                 continue
+            if args.run:
+                try:
+                    src.resolve().relative_to(Path(args.run).resolve())
+                except ValueError:
+                    results.append({
+                        "copied": False, "source": str(src),
+                        "error": f"交付源文件必须位于 --run 运行目录内：{args.run}",
+                    })
+                    continue
             results.append(copy_without_overwrite(src, dest))
         # note 按实际结果生成：交付失败时不得再写"已复制到宿主工作区"
         # （2026-09-21 修复：模型最可能转述的就是这句自然语言）
@@ -564,7 +595,7 @@ def main() -> int:
         "need_dest": need_dest,
         "dest_source": dest_source,
         "dest": str(dest) if dest is not None else None,
-        "skill_output_dir": str(OUTPUT_DIR),
+        "skill_output_dir": (str(Path(args.run).resolve()) if args.run else ""),
         "note": note,
         "files": results,
     }

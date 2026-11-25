@@ -21,18 +21,23 @@
 ## S3 · 注册链路（register_key.mjs，参数以脚本实际签名为准）
 
 ```bash
-# 第一步·领题/发码：优先走文字题（题目只给 agent，不进对话），平台回退时自动走短信直发
+# 第一步·发码：默认走注册通行码通道（一次请求即发码，无需领题答题）。
+# 通行码失效/停用时脚本自动回落原领题流程（输出带 keyFallback 标记）；--legacy 显式跳过本通道。
 node scripts/register_key.mjs challenge --phone <手机号>
-# 第二步·答题（文字题流）：题目是算术题，答案为非负整数；由 agent 计算，不问用户
+# 回落分支（仅当 challenge 输出带 question，即走了原领题流程）：
+#   题目是算术题，答案为非负整数；由 agent 计算，不问用户
 node scripts/register_key.mjs answer --phone <手机号> --answer <非负整数>
-# 第三步·注册取 Key：验证码来自用户收到的短信，只能由用户提供
+# 第二步·注册取 Key：验证码来自用户收到的短信，只能由用户提供（flow=key 时无需 answer）
 node scripts/register_key.mjs register --phone <手机号> --vcode <6位验证码>
-# 补写（仅当 register 输出 persistFailed=true 时：密钥已在本机临时保管文件里，0600、30 分钟内有效。
-# 先修复配置目录可写，再运行 persist——它自动从保管文件恢复并正式落盘，成功即删保管文件）
+# 补写（仅当 register 输出 persistFailed=true 时：Key 已在本机临时保管文件里，0600、30 分钟内有效。
+# 先修复配置目录可写，再运行 persist——它自动从保管文件恢复并正式落盘，成功即清空保管文件）
 node scripts/register_key.mjs persist
 ```
 
-- `pending:true`（deliveryStatus PENDING）不是错误：账号已建、密钥准备中，等用户示意后同参数重试一次（短信码 5 分钟有效），不要重新注册、不要重新发码；
+- challenge 输出 `flow:"key"`：已发码，直接等用户回复 6 位验证码，不需要 answer；
+- 限频（SMS_RATE_LIMIT）、号码被拒（SMS_REQUEST_REJECTED）、供应商失败（SMS_PROVIDER_FAILED）、
+  结果未确认（RESULT_UNKNOWN）一律停点不重发——回落等于再发一次，可能绕过频控；
+- `pending:true`（deliveryStatus PENDING）不是错误：账号已建、访问凭证准备中，等用户示意后同参数重试一次（短信码 5 分钟有效），不要重新注册、不要重新发码；
 - 验证码只能由用户提供，agent 不猜测、不重试超过 2 次；
 - register 成功时 Key 自动写入 `~/.config/dknowc/api_key`（0600、原子替换），stdout 只出掩码——**任何情况下不从输出里找明文 Key**；
 - 写入失败（persistFailed=true、pendingKeySaved=true）时按输出 user_message 引导：修复配置目录（常见：目录被占用/权限不足）→ 用户说"重试写入" → 跑 `persist`（recoveredFromPending=true 即恢复成功）；pendingKeySaved=false（连保管文件都写不下）才走网页方式；全程不把明文 Key 打进对话；

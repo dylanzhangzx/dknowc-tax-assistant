@@ -13,8 +13,8 @@ absolute_review 中按行号逐条说明理由。
 
 用法：
   python3 scripts/check_answer.py \
-    --answer official-docs/search-results/tax_<任务>_answer.txt \
-    --selfcheck official-docs/search-results/tax_<任务>_selfcheck.json
+    --answer ./runs/<任务>-<时间>/tax_answer.txt \
+    --selfcheck ./runs/<任务>-<时间>/tax_selfcheck.json
 
 不要写成 `... | tail -30; echo $?`——那样拿到的是 tail 的退出码，不是本脚本的。
 """

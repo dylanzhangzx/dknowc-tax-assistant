@@ -34,7 +34,7 @@ import sys
 from datetime import date
 from typing import Any, Dict, List
 
-from path_guard import safe_read_path, safe_write_path
+import run_dir
 
 PROVINCES = (
     "北京市", "天津市", "河北省", "山西省", "内蒙古自治区", "辽宁省", "吉林省",
@@ -406,12 +406,16 @@ def main() -> int:
     parser.add_argument("--as-of", default="", help="截至日期 YYYY-MM-DD")
     parser.add_argument("--jurisdiction", default="", help="问题地域，如“北京市大兴区”")
     parser.add_argument("--input", help="已有 profile JSON，校验并规范化")
-    parser.add_argument("--output", default="tax_question_profile.json", help="输出文件名")
+    parser.add_argument("--out", help="运行目录（会话工作区）；与 --output 文件名一起用")
+    parser.add_argument("--output", default="tax_question_profile.json",
+                        help="输出文件名（配合 --out）或显式输出路径（不得指向 Skill 安装目录）")
     args = parser.parse_args()
 
     if args.input:
         try:
-            profile = json.loads(safe_read_path(args.input).read_text(encoding="utf-8"))
+            profile = json.loads(
+                run_dir.resolve_run_input(args.input, args.out).read_text(encoding="utf-8")
+            )
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             parser.error(f"profile 不可读：{exc}")
     else:
@@ -427,7 +431,7 @@ def main() -> int:
         return 1
 
     try:
-        out = safe_write_path(args.output)
+        out = run_dir.resolve_write_target(args.output, args.out)
     except ValueError as exc:
         parser.error(str(exc))
     out.parent.mkdir(parents=True, exist_ok=True)

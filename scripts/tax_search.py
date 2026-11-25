@@ -31,13 +31,11 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tax_client as client
+import run_dir
 try:
     import tag_catalog
 except Exception:  # 目录缺失时不影响检索
     tag_catalog = None  # type: ignore
-
-SKILL_ROOT = Path(__file__).resolve().parent.parent
-RESULTS_DIR = SKILL_ROOT / "official-docs" / "search-results"
 
 # 全文兜底时按标题挑副本要剔除的噪音词（出现在"标题减去查询名"的剩余部分时剔除）
 BAD_TITLE_WORDS = (
@@ -271,18 +269,28 @@ def output_body(query: str, ref: str, articles: List[Dict[str, Any]], tax_meta: 
     }
 
 
-def resolve_output_path(name: str) -> Path:
-    path = Path(name)
-    if path.is_absolute():
-        raise client.TaxApiError("output", "--output 只接受 official-docs/search-results/ 下的文件名")
-    if path.parent in (Path("."), Path("")):
-        path = RESULTS_DIR / path
-    else:
-        path = SKILL_ROOT / path
-    resolved = path.resolve()
-    if RESULTS_DIR.resolve() not in resolved.parents and resolved.parent != RESULTS_DIR.resolve():
-        raise client.TaxApiError("output", "--output 必须位于 official-docs/search-results/ 内")
-    return resolved
+def resolve_output_path(args: argparse.Namespace) -> Path:
+    """产物落盘位置（2026-11-20 运行目录口径）：
+    --out 新建运行目录 / --run 使用已有运行目录 / 都不传则在当前工作目录 runs/ 下新建；
+    拒绝写入 Skill 安装目录（含 official-docs/），不覆盖已有运行结果。
+    """
+    try:
+        if getattr(args, "out", "") and getattr(args, "run", ""):
+            raise ValueError("--out 与 --run 只能二选一（新建运行目录 / 使用已有运行目录）")
+        if getattr(args, "out", ""):
+            run = run_dir.new_run_dir(args.out, "--out")
+        elif getattr(args, "run", ""):
+            run = run_dir.open_run_dir(args.run, "--run")
+        else:
+            run = run_dir.auto_run_dir()
+    except ValueError as exc:
+        raise client.TaxApiError("output", str(exc)) from None
+    name = args.output or ("tax_fulltext.json" if args.file else "tax_search.json")
+    try:
+        target = run_dir.out_file(run, name)
+    except ValueError as exc:
+        raise client.TaxApiError("output", str(exc)) from None
+    return target
 
 
 def run(args: argparse.Namespace) -> Dict[str, Any]:
@@ -357,7 +365,9 @@ def main() -> None:
     parser.add_argument("--limit-articles", type=int, default=10, help="最多返回材料数（默认 10）")
     parser.add_argument("--segment-count", type=int, default=8, help="返回段落数（默认 8）")
     parser.add_argument("--max-chars", type=int, default=60000, help="全文模式的字符上限（默认 60000，截断会如实标注）")
-    parser.add_argument("--output", "-o", help="结果 JSON 文件名（写入 official-docs/search-results/）")
+    parser.add_argument("--out", help="新建运行目录（会话工作区，如 ./runs/20261120-B01-<时间>）；已有结果的目录会被拒绝")
+    parser.add_argument("--run", help="使用已存在的运行目录（补查/续跑时用）；目录内已有同名产物不会被覆盖")
+    parser.add_argument("--output", "-o", help="结果 JSON 文件名（配合 --out/--run 放进运行目录）或显式输出路径（不得指向 Skill 安装目录）")
     parser.add_argument("--json-only", action="store_true", help="仅输出 JSON")
     parser.add_argument("--timeout", type=int, default=90, help="单次请求超时秒数（默认 90）")
     args = parser.parse_args()
@@ -373,21 +383,20 @@ def main() -> None:
         }, ensure_ascii=False, indent=2), file=sys.stderr)
         sys.exit(1)
 
+    path = resolve_output_path(args)
+    body.setdefault("_tax", {})["run_dir"] = str(path.parent)
     raw = json.dumps(body, ensure_ascii=False, indent=2)
-    if args.output:
-        path = resolve_output_path(args.output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(raw, encoding="utf-8")
-        print(f"已保存税务检索 JSON：{path}")
-        if not args.json_only:
-            data = (body.get("content") or {}).get("data") or {}
-            print(f"模式：{(body.get('_tax') or {}).get('mode')}｜材料：{data.get('文章数量')} 条")
-            for idx, article in enumerate(data.get("检索文章") or [], start=1):
-                print(f"{idx}. {article.get('文章标题')}｜{article.get('文号') or article.get('数据源')}｜{article.get('发布日期')}")
-                for para in (article.get("段落") or [])[:1]:
-                    print("   " + snippet(str(para.get("内容") or ""), 160))
-        return
-    print(raw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(raw, encoding="utf-8")
+    print(f"已保存税务检索 JSON：{path}")
+    print(f"运行目录：{path.parent}")
+    if not args.json_only:
+        data = (body.get("content") or {}).get("data") or {}
+        print(f"模式：{(body.get('_tax') or {}).get('mode')}｜材料：{data.get('文章数量')} 条")
+        for idx, article in enumerate(data.get("检索文章") or [], start=1):
+            print(f"{idx}. {article.get('文章标题')}｜{article.get('文号') or article.get('数据源')}｜{article.get('发布日期')}")
+            for para in (article.get("段落") or [])[:1]:
+                print("   " + snippet(str(para.get("内容") or ""), 160))
 
 
 if __name__ == "__main__":

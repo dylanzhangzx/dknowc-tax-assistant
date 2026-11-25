@@ -41,7 +41,7 @@
 ## 校验返回标签
 
 ```bash
-python3 scripts/tag_catalog.py --check official-docs/search-results/tax_<任务>_v1.json
+python3 scripts/tag_catalog.py --check ./runs/<任务>-<时间>/tax_search_v1.json
 ```
 
 列出接口返回的、目录里不存在的标签路径（多副本标签治理问题），记录到研究资料，不据此改查询。

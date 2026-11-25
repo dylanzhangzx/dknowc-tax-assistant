@@ -32,7 +32,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from question_profile import CITY_PROVINCE, PROVINCES, PROVINCE_SHORT
-from path_guard import safe_read_path, safe_write_path
+import run_dir
 
 PROVINCE_DOMAIN_PREFIX = {
     "bj": "北京市", "tj": "天津市", "he": "河北省", "sx": "山西省",
@@ -130,6 +130,10 @@ def _infer_jurisdiction(item: Dict[str, Any]) -> str:
     issuer_local = _has_local_marker(issuer)
     if issuer_local:
         return issuer_local
+    # 发布机关是中央部委/总局（财政部、国家税务总局…）即全国口径：
+    # 中央文件被地方门户/镜像站转载时，不能因为数据源在某省就判成地方文件。
+    if any(term in issuer for term in NATIONAL_TERMS):
+        return "全国"
     title_local = _has_local_marker(title)
     central_title = any(term in title for term in NATIONAL_TERMS)
     # 地方税务局/财政厅的标题带省名（即使含"国家税务总局"前缀）先认地方；
@@ -147,9 +151,6 @@ def _infer_jurisdiction(item: Dict[str, Any]) -> str:
     source_local = _has_local_marker(source)
     if source_local and re.search(r"税务局|财政厅|财政局|人民政府|人社局", source):
         return source_local
-
-    if any(term in issuer for term in NATIONAL_TERMS):
-        return "全国"
 
     for city in sorted(CITY_PROVINCE, key=len, reverse=True):
         if city in meta or city in url:
@@ -329,23 +330,29 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="生成税务材料画像 source cards")
     parser.add_argument("--input", required=True, help="检索结果 JSON")
     parser.add_argument("--profile", help="问题画像 JSON（读取 jurisdiction / tax_types）")
-    parser.add_argument("--output", default="tax_source_cards.json", help="输出文件名")
+    parser.add_argument("--out", help="运行目录（会话工作区）；与 --output 文件名一起用")
+    parser.add_argument("--output", default="tax_source_cards.json",
+                        help="输出文件名（配合 --out）或显式输出路径（不得指向 Skill 安装目录）")
     args = parser.parse_args()
 
     try:
-        payload = json.loads(safe_read_path(args.input).read_text(encoding="utf-8"))
+        payload = json.loads(
+            run_dir.resolve_run_input(args.input, args.out).read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         parser.error(f"输入不可读：{exc}")
     question_jurisdiction = ""
     if args.profile:
         try:
-            profile = json.loads(safe_read_path(args.profile).read_text(encoding="utf-8"))
+            profile = json.loads(
+                run_dir.resolve_run_input(args.profile, args.out).read_text(encoding="utf-8")
+            )
             question_jurisdiction = str(profile.get("jurisdiction") or "")
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             parser.error(f"profile 不可读：{exc}")
 
     try:
-        out = safe_write_path(args.output)
+        out = run_dir.resolve_write_target(args.output, args.out)
     except ValueError as exc:
         parser.error(str(exc))
     out.parent.mkdir(parents=True, exist_ok=True)
