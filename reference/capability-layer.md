@@ -182,7 +182,7 @@ python3 {baseDir}/scripts/verify_claims.py \
 - interpretation 是否同时给出 primary / alternative；
 - 答案里的强断言（免征/免税/减半/不得享受/已经/属于……）是否有 `answer_anchor` 或引用角标。
 
-`verdict` 非 `pass` 不得生成最终报告。
+`verdict` 非 `pass` 不得生成最终报告（判据 = 退出码 0 且输出含 [GATE-PASS]，见 SKILL「命令约定（跨平台）」）。
 
 ## 6. 报告核验状态（两轨验收，不合格不出报告）
 

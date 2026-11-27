@@ -2,6 +2,7 @@
 """阻止 API Key、真实配置和本地生成物进入公开包。"""
 
 import re
+import sys
 from pathlib import Path
 
 
@@ -94,6 +95,8 @@ def main():
                     )
                 for match in DOC_REF_PATTERN.finditer(line):
                     ref = match.group(1)
+                    if ref.endswith("xxx.py"):
+                        continue  # 文档示例占位符（SKILL「命令约定（跨平台）」），非真实引用
                     if not (SKILL_ROOT / ref).is_file():
                         findings.append(
                             f"{path.relative_to(SKILL_ROOT)}:{line_number}: 引用了包内不存在的文件 {ref}"
@@ -126,10 +129,12 @@ def main():
                 findings.append(f"{path.relative_to(SKILL_ROOT)}:{line_number}: 发现包外/维护仓库路径引用（对外包必须自洽）")
 
     if findings:
-        print("发布检查失败：发现不应进入公开包的内容")
-        print("\n".join(findings))
+        # 跨平台闸门标记（DW-0115）：失败必须 stderr + 非零退出，不得静默。
+        print("发布检查失败：发现不应进入公开包的内容", file=sys.stderr)
+        print("\n".join(findings), file=sys.stderr)
         raise SystemExit(1)
     print("发布检查通过：未发现真实配置、API Key 或本地生成物")
+    print("[GATE-PASS] check_release: 发布检查通过")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ description: "当用户需要查询税收政策与口径——个人所得税（
 description_zh: "深知税务助手，面向需要把税收政策弄明白、把办税依据找扎实的人——企业财务与办税人员、个体工商户、代账与人力资源从业者，以及需要确认“这项税到底怎么交、能免多少、依据在哪”的个人。它不凭记忆答税率，而是把“这个事项适用哪份文件、哪一条、哪个年度的口径、金额怎么算”一路查到原文。\n\n能查：个人所得税、增值税、企业所得税、税收征管、税收优惠及社保缴费等相邻事项的政策原文；支持按税种/事项聚焦检索，也能按文件名称调取全文核对；对优惠政策的延续、替代与到期关系，按最新公告核对后再下结论。\n\n能算：税额、滞纳金、优惠上限、累计预扣与专项附加扣除等高频计算，逐项列公式、年度口径与假设；税率表与速算扣除数标明适用年度和文件依据，不拿旧年度标准当现行政策。\n\n能核：每个结论挂载政策原文、文号与发布日期，点开可回看；答案写明适用纳税年度，按“文件全称＋文号＋日期”锁定版本；交付前做事实有据、角标绑定、答案一致、时效确认、无未核验断言五项自检，并单独生成一份可逐条核对的溯源核验报告。\n\n交付：直接回答 + 一份含“正文、溯源核验报告、知识专库”三页的单文件 HTML，可导出 Markdown 与 PDF。当前覆盖中国大陆税务，社保作为相邻领域；港澳台及外国税法不在范围，不提供税务筹划方案与涉税鉴证意见。\n\n由北京彩智科技有限公司旗下“深知可信智能”提供。"
 description_en: "dknowc tax assistant is a tax-domain knowledge service Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It covers China mainland taxation (individual income tax, VAT, corporate income tax, tax administration, tax incentives, plus social insurance as an adjacent area), uses trusted search V2 provision-level retrieval with full-path label fencing, pins policy versions by document number and date, and delivers provenance-enabled answers with a three-page HTML traceability report. Answers always state the applicable tax year — never stale rates from model memory."
 category: 财税
-version: "1.0.4"
+version: "1.0.5"
 author: 彩智科技
 permissions:
   network:
@@ -64,7 +64,7 @@ secrets:
 
 ## 初始化
 
-任务开始先跑：`python3 scripts/initialize.py`。`ready=false` 时按 `reference/onboarding_scripts.md` 的 S1 话术引导，不得先答税务结论。
+任务开始先跑：`python3 scripts/initialize.py`（Windows 见「命令约定（跨平台）」；判据 = 退出码 0 且输出含 [GATE-PASS]）。`ready=false` 时按 `reference/onboarding_scripts.md` 的 S1 话术引导，不得先答税务结论。
 
 ## 运行目录（硬规则）
 
@@ -75,6 +75,12 @@ secrets:
 - `--output` 只写运行目录内的裸文件名（不带路径），同名文件已存在时拒绝覆盖；需要重跑就换文件名或新建 run。
 - 两个参数都不传时，脚本在当前工作目录 `runs/tax-<时间戳>/` 自动新建；当前目录若在 Skill 安装目录内会直接拒绝。
 
+## 命令约定（跨平台）
+
+- 文档统一以 `python3 scripts/xxx.py` 书写命令，macOS/Linux 直接可用。**Windows 注意**：`python3` 是微软商店的应用执行别名（占位符），运行结果为零输出、零报错、拿不到退出码——此时解释器根本没有执行，**必须改用 `python`（或 `py`）重新运行**，不得把零输出当作成功。
+- 关键闸门脚本（`initialize.py`、`verify_claims.py`、`check_answer.py`，均为包内脚本）成功时输出含统一标记 **`[GATE-PASS]`**（stderr 流，stdout 保持纯 JSON）。判据是**"退出码 0 且输出含 [GATE-PASS]"**，缺一即视为未通过：零输出、报错、无标记都不得当作通过，必须换命令重跑或修正输入后重跑。失败路径为 stderr + 非零退出（仅 `verify_claims` 额外带 `[GATE-FAIL]` 标记；渲染成功输出"已生成：<路径>"、失败输出 stderr，均非静默）。
+- 本节约定覆盖全部 reference 文档中的 `python3` 命令与闸门判据，不逐处重复标注。
+
 ## 工作流
 
 1. 判断任务：一税种/一事项一条聚焦短 query；缺纳税人身份/年度/地域等关键变量先追问。先建运行目录 `--out ./runs/<任务>-<时间>`，跑 `scripts/question_profile.py` 落 `tax_question_profile.json`（地域/时点/税种/纳税人身份/优惠/申报期），并保存用户原话 `tax_question.txt`。
@@ -84,7 +90,7 @@ secrets:
 3. 材料不足时换 query 措辞补搜（加分年份词收敛年度混排）；需要全文核对走 `--file`。**联网前先用 `--file "文件全名"` 做库内确认**（001 全文兜底）：命中取全文；找不到或只命中旧版才联网；"最新/2026/现行"遇库内旧版属版本敏感，必须联网核新文并写明"库内为 X 版、外部为新版"。仍无支撑时按三阶段降级：阶段二 `--search-channel webSearch`（独立落盘、不传标签），阶段三宿主 WebSearch（有工具时）→ `websearch_convert.py` → merge；外部材料按 `reference/websearch-fallback.md` 标注与限用。
 4. 多路结果用 `scripts/merge_search_results.py --run` 合并（答案角标 `[n]` 用合并产物里的 `编号` 字段）；合并后跑 `scripts/source_cards.py --out/--run` 落 `tax_source_cards.json`（地域/文件类型/来源性质/抓取状态）。
 5. 按 `reference/answer-and-report.md` 写答案：结论 → 适用条件（含身份/年度/例外）→ 政策依据（全称/文号/日期/条款）→ 待确认清单。同步写 `tax_claims.json`：每条结论标明类型（direct/calculation/negative/inference/external/interpretation）、来源、地域、税种与时点；计算必须用 `calc_tax.py` 并写入输入与结果。
-6. 生成报告前强制跑 `scripts/verify_claims.py --run`（`verdict` 必须 `pass`）与 `scripts/check_answer.py`（退出码必须 0）；**写结构化 selfCheck**：`tax_selfcheck.json` 五项（事实有据/角标绑定/答案一致/时效确认/无未核验断言），每项 `{verdict, basis, evidence}`，evidence 必须含可回查要素（见规则 4.3）；未通过先改规则/答案，不输出报告。
+6. 生成报告前强制跑 `scripts/verify_claims.py --run` 与 `scripts/check_answer.py`，判据均为**"退出码 0 且输出含 [GATE-PASS]"**（零输出/报错/无标记一律不得当作通过，见「命令约定（跨平台）」）；**写结构化 selfCheck**：`tax_selfcheck.json` 五项（事实有据/角标绑定/答案一致/时效确认/无未核验断言），每项 `{verdict, basis, evidence}`，evidence 必须含可回查要素（见规则 4.3）；未通过先改规则/答案，不输出报告。
 7. 渲染（内核来自上游「溯源核验报告生成器」，整体继承不改内核）：先 `scripts/build_report_input.py <merge产物> --run <运行目录> --output input.json` 转通用 JSON，再 `scripts/render_trace_html.py input.json --run <运行目录> --output <短文件名>.html --config reference/trace_report.config.json --verify-file tax_verify.json --self-check-file tax_selfcheck.json` 生成单文件三页 HTML（正文／溯源核验报告／知识专库）。**两轨门禁**：结构核验或 AI 验收任一不过，脚本退出 1 且不写 HTML，按 stderr 原因修正后重跑；通过则报告只呈现"已核验"。run 内重跑直接覆盖同名（交付版本编号由 deliver_outputs 在用户目录处理），交付文件名用答案标题的 8-20 字短名、不带 `_v2`/时间戳。交付用 `scripts/deliver_outputs.py --run <运行目录>`，只交付 HTML。
 
 ## 交付底线

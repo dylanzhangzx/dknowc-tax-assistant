@@ -570,7 +570,15 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["verdict"] == "pass" else 1
+    # 跨平台闸门标记（DW-0115，对齐公文写作 3.9.11）：Windows 的 python3 是商店占位符，
+    # 脚本不执行时零输出；判据 = 退出码 0 且输出含 [GATE-PASS]，缺一即未通过。
+    if result["verdict"] == "pass":
+        # 标记走 stderr：stdout 保持纯 JSON（观察 2，对齐法律 1.0.5）
+        print("[GATE-PASS] verify_claims: 结论台账校验通过", file=sys.stderr)
+        return 0
+    print(f"[GATE-FAIL] verify_claims: verdict={result['verdict']}（"
+          + "；".join(result["issues"][:3]) + "）", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

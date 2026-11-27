@@ -1,5 +1,18 @@
 # CHANGE_log · dknowc-tax-assistant
 
+## v1.0.5（2026-11-27，DW-0115 整改 + 升版对齐，未封版）
+
+背景：v1.0.4（渲染内核继承 + 运行目录隔离 + 两档核验）已于 2026-11-25 以 skillhub 包 `c69ed3a7` 发布到部分渠道；DW-0115 整改后的最终内容按 Dylan 指示**升版 1.0.5** 发布，不复用已发布的 1.0.4 版本号。
+
+- **DW-0115 整改（本轮主题，全部在 1.0.5 内）**：
+  - SKILL 新增「命令约定（跨平台）」节：Windows `python3` 为商店占位符（零输出零报错须改用 `python`/`py` 重跑）；闸门判据 = **退出码 0 且输出含 [GATE-PASS]**，标记走 stderr，stdout 保持纯 JSON。
+  - 闸门脚本加统一标记：`initialize.py` / `verify_claims.py` / `check_answer.py` 成功输出 `[GATE-PASS]`；失败改 stderr + 非零退出（仅 `verify_claims` 额外带 `[GATE-FAIL]`）；`check_release.py` 同口径（仓库侧工具）。
+  - SKILL 闸门清单只列包内三脚本；渲染成功输出「已生成：<路径>」非静默、不带标记；渲染内核与上游 1.0.2 逐字节一致（上一版误加的 2 行标记已回退）。
+  - `check_release.py` 文档自洽检查放行 `scripts/xxx.py` 占位符写法。
+  - 新增 `tests/test_gate_markers.py`（11 项，含"渲染内核无标记"静态回归）；母版 58 项 unittest 全过。
+- **渠道侧（public 版本对齐会话）**：新增 ca-sme（中小企业协会）渠道（平铺 zip 含 README，渠道码 `38057B3D-DD38-4557-83E1-16784BF167CE`，对齐公文写作/可信搜索 ca-sme 形态）；workbuddy_files 同步 DW-0115（WB 口径 `gate_pass = delivery_mode==verified`、initialize 标记在 stdout 沙箱口径）并修正闸门文档与包内容不一致（首轮审核条件 1）。
+- **审核**：十二渠道包首轮审核「有条件通过」（条件 1：WB 闸门文档不一致 → 本版修复）；母版 DW-0115 复审通过（0 条件/阻断），报告 `skill优化前审核/2026-11-27/`。
+
 ## v1.0.4 追加（2026-11-25，渲染内核继承上游「溯源核验报告生成器」1.0.2，未封版）
 
 按上游发布通知整体继承（Dylan 指示：版本号不升；治理约定：不改上游源码目录、不在包内 fork 内核）。
@@ -197,3 +210,13 @@
 ## v1.0.4 追加（2026-11-25，审核阻断 X15 修复，未封版）
 
 - **X15（审核阻断）**：`register_key.mjs` 的 `genPassword()` 从 `Math.random()` 改为 `crypto.randomInt`（CSPRNG），与可信搜索/法律/咨询/PPT 五产品同款；选字符与洗牌两处均改。`tests/test_register_key_channel.py` 新增静态回归（代码行不得出现 Math.random、必须用 randomInt），防止回潮。
+
+## v1.0.4 追加（2026-11-25，发布后 · DW-0115 跨平台闸门标记，对齐公文写作 3.9.11）
+
+台账会话移交（陆建泽 2026-11-11 Windows + Git Bash 实测，六族 skill 通用）：Windows 的 `python3` 是微软商店占位符，执行零输出零报错；税务包的闸门脚本成功路径全安静，"没执行"与"通过"无法区分，报告门禁会整体失效。
+
+- **SKILL.md 新增「命令约定（跨平台）」节**：Windows 下改用 `python`/`py`；闸门判据 = **退出码 0 且输出含 [GATE-PASS]**，零输出/报错/无标记一律不得当作通过；本节覆盖全部 reference 文档命令。初始化节与工作流第 6 步判据措辞同步；answer-and-report / capability-layer 的闸门判据同步。
+- **闸门脚本成功出口打印 `[GATE-PASS]`**：`initialize.py`（gate_pass=ready，写入 JSON）、`verify_claims.py`（verdict=pass；失败 `[GATE-FAIL]` + stderr + exit 1）、`check_answer.py`（两条通过路径）、`check_release.py`（失败改 stderr + exit 1）、`render_trace_html.py`（两轨通过且 HTML 落盘）。
+- **WorkBuddy overlay** `initialize.py` 同步：WB 口径 gate_pass = delivery_mode=verified（baseline_no_key 是合法结果，Agent 按 JSON 走兜底交付，不把"未就绪"当"没执行"）。
+- 新增 `tests/test_gate_markers.py`（11 项：5 脚本源码契约 + SKILL 节 + check_answer/verify_claims 成败双路径功能冒烟 + initialize 无 Key 路径）。
+- 状态：master 已并入；**已发布的 v1.0.4 包不含本修复**，随下次封版/重发带上（是否单独重发待 Dylan 定）。

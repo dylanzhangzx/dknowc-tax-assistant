@@ -24,7 +24,7 @@ python3 scripts/check_answer.py \
   --selfcheck ./runs/<任务>-<时间>/tax_selfcheck.json
 ```
 
-退出码 0 才继续；命中项改写，或在 selfcheck 的 `absolute_review` 按行号逐条说明（对象，键=行号）。注意管道会吞退出码，直接跑、别接 `| tail; echo $?`。
+判据 = **退出码 0 且输出含 [GATE-PASS]**（见 SKILL「命令约定（跨平台）」，零输出≠通过）；命中项改写，或在 selfcheck 的 `absolute_review` 按行号逐条说明（对象，键=行号）。注意管道会吞退出码，直接跑、别接 `| tail; echo $?`。
 
 ## 自检五项（AI 验收轨，写入 selfcheck JSON）
 

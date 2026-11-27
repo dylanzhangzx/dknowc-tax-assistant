@@ -146,8 +146,12 @@ def main():
     register_script = Path(__file__).resolve().parent / "register_key.mjs"
     register_script_available = register_script.is_file()
 
+    # 跨平台闸门标记（DW-0115，对齐公文写作 3.9.11）：Windows 的 python3 空壳不执行本
+    # 脚本时零输出；判据 = 退出码 0 且输出含 [GATE-PASS]，gate_pass 以 ready 为准。
+    gate_pass = not blocking_issues
     print(json.dumps({
         **status,
+        "gate_pass": gate_pass,
         "python_executable": sys.executable,
         "node_available": node["node_available"],
         "node_version": node["node_version"],
@@ -177,6 +181,9 @@ def main():
         ),
         "maas_platform_url": MAAS_PLATFORM_URL,
     }, ensure_ascii=False, indent=2))
+    if gate_pass:
+        # 标记走 stderr：stdout 保持纯 JSON（观察 2，对齐法律 1.0.5）
+        print("[GATE-PASS] initialize: 环境就绪", file=sys.stderr)
 
 
 if __name__ == "__main__":

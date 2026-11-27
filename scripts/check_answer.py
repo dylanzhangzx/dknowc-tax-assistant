@@ -173,7 +173,9 @@ def main() -> int:
 
     findings = scan(answer_path.read_text(encoding="utf-8"))
     if not findings:
+        # 跨平台闸门标记（DW-0115）：判据 = 退出码 0 且输出含 [GATE-PASS]（零输出≠通过）。
         print("措辞检查通过：未发现无条件结论或未注明的事实假设")
+        print("[GATE-PASS] check_answer: 措辞检查通过")
         return 0
 
     review, review_loaded = (None, False)
@@ -203,6 +205,7 @@ def main() -> int:
         return 1
 
     print("\n以上表述已在 absolute_review 中逐条说明，可继续生成报告")
+    print("[GATE-PASS] check_answer: 命中项已逐条说明，可继续生成报告")
     return 0
 
 
